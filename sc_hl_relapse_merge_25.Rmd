@@ -467,6 +467,7 @@ DoHeatmap(cluster.averages,
 
 ```{r}
 library(pheatmap)
+library(dplyr)
 
 hl_R.expr.scaled <- GetAssayData(object = hl_relapse.merged, slot = "scale.data")
 # this is a 3000 (features) X 76607 (barcodes) matrix
@@ -499,15 +500,19 @@ hl_R.components.cluster.avgs <- hl_R.cluster.avgs[ rownames(hl_R.cluster.avgs) %
 # create heatmap split by component
 component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
 rownames(component.mappings) <- component.mappings$Gene
+components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
 component.mappings$Gene <- NULL
 component.mappings$Alt_name <- NULL
 
 # reorder expression matrix to match component mappings
-hl_R.components.cluster.avgs.ordered <- hl_R.components.cluster.avgs[ row.names(component.mappings), ]
+hl_R.components.cluster.avgs.ordered <- hl_R.components.cluster.avgs[ row.names(components.ordered), ]
 
 pheatmap(hl_R.components.cluster.avgs.ordered, 
          annotation_row = component.mappings, 
-         cluster_rows = FALSE, annotation_names_row = FALSE, angle_col = 45, gaps_row = c(2,5,10))
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         angle_col = 45, 
+         gaps_row = c(3,9,12,14,20,23,24,28,29,30,32,33,36,42,44))
 
 ```
 
