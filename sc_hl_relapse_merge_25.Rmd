@@ -181,9 +181,9 @@ SCTransform now replaces all of:
 ```{r}
 # previous workflow:
 
-hl_relapse.merged <- NormalizeData(hl_relapse.merged, normalization.method = "LogNormalize", scale.factor = 10000)
-hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged, selection.method = "vst", nfeatures = 2000)
-hl_relapse.merged <- ScaleData(hl_relapse.merged, vars.to.regress = c("batch", "chip", "percent.mt"), verbose = FALSE)
+#hl_relapse.merged <- NormalizeData(hl_relapse.merged, normalization.method = "LogNormalize", scale.factor = 10000)
+#hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged, selection.method = "vst", nfeatures = 2000)
+#hl_relapse.merged <- ScaleData(hl_relapse.merged, vars.to.regress = c("batch", "chip", "percent.mt"), verbose = FALSE)
 
 # plot the 30 most highly variable genes
 top30 <- head(VariableFeatures(hl_relapse.merged), 30)
@@ -330,18 +330,15 @@ hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe
 
 ```{r}
 # find markers for every cluster compared to all remaining cells, report only the positive ones
-hl_relapse.merged.markers <- FindAllMarkers(hl_relapse.merged, 
-                                            only.pos = TRUE, 
-                                            min.pct = 0.25, 
+hl_relapse.merged.markers <- FindAllMarkers(hl_relapse.merged,
+                                            only.pos = TRUE,
+                                            min.pct = 0.25,
                                             logfc.threshold = 0.25)
 top10 <- hl_relapse.merged.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
 write.table(top10, "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/top_10_de_markers-cluster_vs_all_other_clusters.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 
 #top10 <- hl_relapse.merged %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
 DoHeatmap(hl_relapse.merged, features = top10$gene) + NoLegend()
-```
-
-```{r}
 ```
 
 ## Show UMAP visualization based on cluster, chip, and batch (to show normalization has occurred)
@@ -469,13 +466,12 @@ DoHeatmap(cluster.averages,
 library(pheatmap)
 library(dplyr)
 
-hl_R.expr.scaled <- GetAssayData(object = hl_relapse.merged, slot = "scale.data")
+hl_R.sct.scaled <- hl_relapse.merged@assays$SCT@scale.data
 # this is a 3000 (features) X 76607 (barcodes) matrix
 hl_R.cluster.avgs <- GetAssayData(object = cluster.averages, slot = "scale.data")
 # a 20313 (features) X 27 (clusters) matrix
 write.table(hl_R.cluster.avgs, "~/Documents/sc_HL_relapse/seurat/output/hl_R.cluster.avgs.expr.txt", sep = "\t")
 # read back in if needed
-
 
 # extract markers of interest
 markers.to.plot <- c("CD3D", "CD8B", "CD4", 
@@ -512,13 +508,107 @@ pheatmap(hl_R.components.cluster.avgs.ordered,
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(3,9,12,14,20,23,24,28,29,30,32,33,36,42,44))
+         gaps_row = c(3,9,12,14,20,23,24,28,29,30,32,33,36,42,44), border_color = NA)
 
+```
+
+## Produce single-cell level heatmaps of expression for EACH cluster
+
+```{r}
+library(gridExtra)
+
+NUM_CLUSTERS = 27
+
+# retrieve expression for each cell across the component genes of interest
+hl_R.sct.markers <- hl_R.sct.scaled[ rownames(hl_R.sct.scaled) %in% markers.to.plot , ]
+
+# create heatmap split by component
+component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
+# remove genes that are not in the the 3000 top variable genes
+genes.not_var <- c("CD274", "CD44", "ICOSLG")
+component.mappings <- filter(component.mappings, !(component.mappings$Gene %in% genes.not_var))
+# order by component then gene name so that the heatmap legend makes sense
+rownames(component.mappings) <- component.mappings$Gene
+components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+components.ordered$Gene <- NULL
+components.ordered$Alt_name <- NULL
+
+# reorder expression matrix to match component mappings
+hl_R.sct.markers.ordered <- hl_R.sct.markers[ row.names(components.ordered), ]
+
+# to create separate expr matrices for each cluster, need mappings for cell --> cluster
+hl_relapse.clusters <- hl_relapse.merged$seurat_clusters
+# convert to char
+clusters.char <- levels(hl_relapse.clusters)[hl_relapse.clusters] # ordered vector of cluster ids (0 through 26)
+barcodes.cluster <- attributes(hl_relapse.clusters)$names # ordered vector of barcodes (76,607 unique entries)
+clusters.df <- data.frame(barcodes.cluster, clusters.char)
+
+# extract barcodes corresponding to clusters (an array of vectors?)
+# pseudocode: 
+
+# for c = 0 to 27
+#   barcodes[c] = all element keys with values of c
+#   hl_R.sct.scaled.arr[c] = hl_R.sct.scaled[ , columns are in barcodes[c] ]
+#   heatmaps[c] <- pheatmap of hl_R.sct.scaled.arr[c]
+
+barcodes <- vector('list', NUM_CLUSTERS)
+expr <- vector('list', NUM_CLUSTERS)
+heatmaps <- vector('list', NUM_CLUSTERS)
+
+for (c in 0:26) {
+  # store list of barcodes by cluster c
+  barcodes[[c+1]] <- filter(clusters.df, clusters.df$clusters.char == c)
+  expr[[c+1]] <- hl_R.sct.markers.ordered[, colnames(hl_R.sct.markers.ordered) %in% barcodes[[c+1]]$barcodes.cluster ]
+  heatmaps[[c+1]] <- pheatmap(expr[[c+1]], 
+         annotation_row = components.ordered, 
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         angle_col = 45, 
+         gaps_row = c(3,8,11,13,18,21,25,26,27,29,30,33,39,41), 
+         border_color = NA, show_colnames = FALSE, scale = "none")
+  #print(i)
+}
+
+# plot all 27 heatmaps
+#grid.arrange(grobs = heatmaps, ncol=3)
+grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 ```
 
 ## Rename clusters based on feature plots
 
 ```{r}
+
+# Tomo's latest mappings (as of June 30, 2020)
+
+#Cluster 0: B cells
+#Cluster 1: B cells
+#Cluster 2: Helper T cells?
+#Cluster 3: B cells
+#Cluster 4: Naïve T cells
+#Cluster 5: B cells
+#Cluster 6: Naïve T cells
+#Cluster 7: Regulatory T cells (Tregs)
+#Cluster 8: Helper T cells
+#Cluster 9: B cells
+#Cluster 10:Cytotoxic T cells (CTL)
+#Cluster 11: B cells
+#Cluster 12: Naïve T cells
+#Cluster 13: B cells
+#Cluster 14: Naïve T cells
+#Cluster 15: B cells
+#Cluster 16: B cells
+#Cluster 17: Helper T cells (TFH??)
+#Cluster 18: Helper T cells?
+#Cluster 19: progenitor?
+#Cluster 20: NK cells
+#Cluster 21: T-regs?
+#Cluster 22: progenitor?
+#Cluster 23: Macrophage
+#Cluster 24: Plasma cell
+#Cluster 25:Plasma cell
+#Cluster 26:Plasmacytoid dendritic cells (pDC)
+
+
 hl_relapse.merged.temp <- RenameIdents(hl_relapse.merged, 
                             `0` = "B cells",
                             `1` = "B cells",
