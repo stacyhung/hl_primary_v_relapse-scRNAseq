@@ -202,6 +202,14 @@ hl_diag.merged$chip <- plyr::mapvalues(
 )
 ```
 
+## Merge diagnostic and relapse Seurat objects
+
+```{r}
+# this step takes a long time, so make sure you really want to merge when you perform this step!
+hl.combined <- merge(hl_diag.merged, hl_relapse.merged, add.cell.ids = c("diagnostic", "relapse"), project = "LSARP-HL")
+table(hl_combined$orig.ident)
+```
+
 Standard pre-processing workflow:
 
   1) Selection and filtration of cells based on QC metrics
@@ -233,6 +241,17 @@ VlnPlot(hl_relapse.merged,
 scatter.1 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA",  feature2 = "percent.mt")
 scatter.2 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 CombinePlots(plots = list(scatter.1, scatter.2))
+
+### And same thing for diagnostic dataset
+
+hl_diag.merged[["percent.mt"]] <- PercentageFeatureSet(hl_diag.merged, pattern = "^MT-")
+head(hl_diag.merged@meta.data, 5)
+
+# Visualization transcript information by sample
+VlnPlot(hl_diag.merged, 
+        features = c("nFeature_RNA", "percent.mt"),
+        sort = "increasing", log = FALSE,
+        ncol = 2, pt.size = 0)
 
 # Filter out cells that have between 200-2500 unique features / genes and have less than 20 % mitochondria
 hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)

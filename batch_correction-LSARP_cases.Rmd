@@ -13,12 +13,16 @@ https://satijalab.org/seurat/v3.1/merge_vignette.html
 library(dplyr)
 library(Seurat)
 library(SeuratData)
+library(SeuratWrappers)
 library(tidyr)
 library(grid)
 library(ggplot2)
 library(sctransform)
 library(cowplot)
-library(patchwork)
+library(patchwork) # required for saving R objects to and *.RDS file
+library(scran)
+library(batchelor)
+library(harmony)
 ```
 
 ## Examine QC metrics
@@ -106,40 +110,36 @@ hl_relapse.merged <- CreateSeuratObject(
 )
 # total of 106,831 cells across 25 samples (average ~4K cells)
 
+hl_relapse.merged[["percent.mt"]] <- PercentageFeatureSet(hl_relapse.merged, pattern = "^MT-")
+hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
+
+# 76,607 cells or ~3K cells / sample
+
 # add "relapse" label (in case we want to combine it with primary HL data later)
 hl_relapse.merged[["case.type"]] <- "relapse"
-```
 
 ## Add metadata for batch correction
-
-```{r}
-samples <- hl_relapse.merged@meta.data$orig.ident
-sample.num_cells <- as.data.frame(table(samples))
-colnames(sample.num_cells) <- c("sample", "num_cells")
-
-# plot numbers of cells per sample, ordered by increasing numbers of cells
-p2 <- ggplot(sample.num_cells, aes(x = reorder(sample, -num_cells), y = num_cells)) + 
-      geom_bar(stat = "identity", fill="steelblue", width = 0.8) + 
-      xlab("") + ylab("") + 
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 8)) +
-      theme(panel.spacing = unit(1, "lines"))
-p2
 
 # for both datasets, sample names are under the "Sample" column and the "batch" would be the "GSCFlowcell" column
 hl_relapse.metadata <- read.table("~/Documents/sc_HL_relapse/data/relapse/library_info-relapse-cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
 
-# map batch information to orig.idents 
+# map batch information to orig.idents
 hl_relapse.merged$batch <- plyr::mapvalues(
-    x = hl_relapse.merged$orig.ident, 
-    from = hl_relapse.metadata$Sample, 
-    to = hl_relapse.metadata$GSCFlowcell
-)
-
-hl_relapse.merged$chip <- plyr::mapvalues(
     x = hl_relapse.merged$orig.ident, 
     from = hl_relapse.metadata$Sample, 
     to = hl_relapse.metadata$Chip
 )
+
+hl_relapse.celltypes <- read.table("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/hl_relapse-merged.sct-clusters.annotated.txt", sep = "\t", header = TRUE, fill = TRUE, stringsAsFactors = FALSE)
+hl_relapse.celltypes <- hl_relapse.celltypes [ order(hl_relapse.celltypes$barcode_sample), ]
+
+hl_relapse.merged$celltype2 <- plyr::mapvalues(
+    colnames(hl_relapse.merged), 
+    hl_relapse.celltypes$barcode_sample, 
+    hl_relapse.celltypes$cell_type
+)
+
+saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
 ```
 
 ## Read in raw data and meta data for diagnostic cases
@@ -168,38 +168,86 @@ hl_diag.merged <- CreateSeuratObject(
 )
 # total of 113,429 cells across 22 samples (average ~5K cells)
 
+hl_diag.merged[["percent.mt"]] <- PercentageFeatureSet(hl_diag.merged, pattern = "^MT-")
+
+# Visualization transcript information by sample
+VlnPlot(hl_diag.merged, 
+        features = c("nFeature_RNA", "percent.mt"),
+        sort = "increasing", log = FALSE,
+        ncol = 2, pt.size = 0)
+
+# probably lowering the % MT cutoff to 10% won't make a difference (vs. keeping 20% using in relapse dataset)
+# based on violoin plots, the vast majority of the dataset sits < 5% MT
+hl_diag.merged <- subset (hl_diag.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+
+# 98,313 cells or 4,4K cells/sample
+table(hl_relapse.combined$orig.ident) # get specific numbers based on sample id
+
 # add "diagnostic" label (in case we want to combine it with primary HL data later)
 hl_diag.merged[["case.type"]] <- "diagnostic"
 
 # attach metadata
 
-samples <- hl_diag.merged@meta.data$orig.ident
-sample.num_cells <- as.data.frame(table(samples))
-colnames(sample.num_cells) <- c("sample", "num_cells")
-
-# plot numbers of cells per sample, ordered by increasing numbers of cells
-p2 <- ggplot(sample.num_cells, aes(x = reorder(sample, -num_cells), y = num_cells)) + 
-      geom_bar(stat = "identity", fill="steelblue", width = 0.8) + 
-      xlab("") + ylab("") + 
-      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 8)) +
-      theme(panel.spacing = unit(1, "lines"))
-p2
-
-# for both datasets, sample names are under the "Sample" column and the "batch" would be the "GSCFlowcell" column
+# for both datasets, sample names are under the "Sample" column and the "batch" would be the "Chip" column
 hl_diag.metadata <- read.table("~/Documents/sc_HL_relapse/data/primary/library_info-primary_cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
 
 # map batch information to orig.idents 
 hl_diag.merged$batch <- plyr::mapvalues(
     x = hl_diag.merged$orig.ident, 
     from = hl_diag.metadata$Sample, 
-    to = hl_diag.metadata$GSCFlowcell
-)
-
-hl_diag.merged$chip <- plyr::mapvalues(
-    x = hl_diag.merged$orig.ident, 
-    from = hl_diag.metadata$Sample, 
     to = hl_diag.metadata$Chip
 )
+
+saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
+```
+
+## ###############################################
+## No batch correction
+## ###############################################
+
+```{r}
+# Pre-batch-correction steps: filtering, normalization, finding variable genes
+hl_relapse.merged <- NormalizeData(hl_relapse.merged)
+hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged, selection.method = "vst", nfeatures = 2000)
+
+# Run standard workflow of visualization and clustering
+hl_relapse.merged <- ScaleData(hl_relapse.merged)
+hl_relapse.merged <- RunPCA(hl_relapse.merged, npcs = 30)
+
+# UMAP and clustering
+hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "pca", dims = 1:20)
+hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "pca", dims = 1:20)
+hl_relapse.merged <- FindClusters(hl_relapse.merged, resolution = 0.5)
+
+# Visualization
+p.no_batch_correction.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
+p.no_batch_correction.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
+p.no_batch_correction.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
+```
+
+## And same thing for diagostic dataset
+
+```{r}
+hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
+
+# Pre-batch-correction steps: filtering, normalization, finding variable genes
+hl_diag.merged <- NormalizeData(hl_diag.merged)
+hl_diag.merged <- FindVariableFeatures(hl_diag.merged, selection.method = "vst", nfeatures = 2000)
+
+# Run standard workflow of visualization and clustering
+hl_diag.merged <- ScaleData(hl_diag.merged)
+hl_diag.merged <- RunPCA(hl_diag.merged, npcs = 30)
+
+# UMAP and clustering
+hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "pca", dims = 1:20)
+hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "pca", dims = 1:20)
+hl_diag.merged <- FindClusters(hl_diag.merged, resolution = 0.5)
+
+# Visualization
+p.no_batch_correction.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
+#p.no_batch_correction.celltype <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "celltype")
+p.no_batch_correction.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
+
 ```
 
 ## ###############################################
@@ -207,7 +255,7 @@ hl_diag.merged$chip <- plyr::mapvalues(
 ## ###############################################
 
 ```{r}
-# using anchor method, integrate datasets by BATCH (GSCFlowcell) for HL relapse cases
+# Using anchor method, integrate datasets by BATCH ("Chip" column) for HL relapse cases
 
 # split relapse cases by batch
 hl_relapse.split <- SplitObject(hl_relapse.merged, split.by = "batch")
@@ -217,18 +265,124 @@ hl_relapse.split <- lapply(X = hl_relapse.split, FUN = function(x) {
   x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
 })
 
-# perform integration
+# Perform the integration itself
 hl_relapse.anchors <- FindIntegrationAnchors(object.list = hl_relapse.split, dims = 1:20)
 
 # Save object so that it can be loaded without having to re-run computationally intensive steps again
-#saveRDS(hl_relapse.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-anchors.rds") # 1GB
+#saveRDS(hl_relapse.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-anchors_v2.rds") # 1GB
 
 # read back in if necessary
-hl_relapse.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-anchors.rds")
+hl_relapse.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/split_by_chip/hl_relaspe_25-anchors_v2.rds")
 
 # Use anchors to integrate the datasets together
-hl_relapse.combined <- IntegrateData(anchorset = hl_relapse.anchors, dims = 1:20)
+hl_relapse.combined <- IntegrateData(anchorset = hl_relapse.anchors, dims = 1:20) # very memory intensive (requires over 42GB - performed on work computer and saved resulting RDS object)
+#saveRDS(hl_relapse.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined_v2.rds") # 1GB
 
+hl_relapse.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined.rds")
+
+# Now perform the integrated analysis
+DefaultAssay(hl_relapse.combined) <- "integrated"
+
+# get list of highly-variable genes
+hl_relapse.hvg <- hl_relapse.combined@assays$integrated@var.features
+write.table(hl_relapse.hvg, "~/Documents/sc_HL_relapse/seurat/output/hl_relapse-combined.hgv.txt", sep = "\t", quote = FALSE)
+
+# Run standard workflow of visualization and clustering
+hl_relapse.combined <- ScaleData(hl_relapse.combined)
+hl_relapse.combined <- RunPCA(hl_relapse.combined, npcs = 30)
+
+# UMAP and clustering
+hl_relapse.combined <- RunUMAP(hl_relapse.combined, reduction = "pca", dims = 1:20)
+hl_relapse.combined <- FindNeighbors(hl_relapse.combined, reduction = "pca", dims = 1:20)
+hl_relapse.combined <- FindClusters(hl_relapse.combined, resolution = 0.5)
+
+# Visualization
+p.seurat.batch <- DimPlot(hl_relapse.combined, reduction = "umap", group.by = "batch")
+p.seurat.celltype <- DimPlot(hl_relapse.combined, reduction = "umap", group.by = "celltype")
+p.seurat.cluster <- DimPlot(hl_relapse.combined, reduction = "umap", label = TRUE)
+
+saveRDS(hl_relapse.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined_final.rds")
+
+```
+
+## And same thing for diagnostic samples
+
+```{r}
+# split relapse cases by batch
+hl_diag.split <- SplitObject(hl_diag.merged, split.by = "batch")
+
+hl_diag.split <- lapply(X = hl_diag.split, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+# Perform the integration itself
+hl_diag.anchors <- FindIntegrationAnchors(object.list = hl_diag.split, dims = 1:20)
+
+# Save object so that it can be loaded without having to re-run computationally intensive steps again
+#saveRDS(hl_diag.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-anchors.rds") # 1GB
+
+# read back in if necessary
+#hl_diag.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-anchors.rds")
+
+# Use anchors to integrate the datasets together
+hl_diag.combined <- IntegrateData(anchorset = hl_diag.anchors, dims = 1:20) # very memory intensive (requires over 42GB - performed on work computer and saved resulting RDS object)
+#saveRDS(hl_diag.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined.rds") # 1GB
+
+#hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined.rds")
+
+# Now perform the integrated analysis
+DefaultAssay(hl_diag.combined) <- "integrated"
+
+# Run standard workflow of visualization and clustering
+hl_diag.combined <- ScaleData(hl_diag.combined)
+hl_diag.combined <- RunPCA(hl_diag.combined, npcs = 30)
+
+# UMAP and clustering
+hl_diag.combined <- RunUMAP(hl_diag.combined, reduction = "pca", dims = 1:20)
+hl_diag.combined <- FindNeighbors(hl_diag.combined, reduction = "pca", dims = 1:20)
+hl_diag.combined <- FindClusters(hl_diag.combined, resolution = 0.5)
+
+saveRDS(hl_diag.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined-final.rds")
+
+# Visualization
+p.seurat.batch <- DimPlot(hl_diag.combined, reduction = "umap", group.by = "batch")
+#p.seurat.celltype <- DimPlot(hl_diag.combined, reduction = "umap", group.by = "celltype")
+p.seurat.cluster <- DimPlot(hl_diag.combined, reduction = "umap", label = TRUE)
+```
+
+## Now integrate relapse and diagnostic
+
+```{r}
+hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined-final.rds")
+hl_relapse.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined_final.rds")
+
+hl.both.anchors <- FindIntegrationAnchors(object.list = list(hl_diag.combined, 
+                                                             hl_relapse.combined), 
+                                          dims = 1:20)
+# saved on GSC projects space: /home/shung/share/projects/shung/lsarp_hl_relapse_sc/seurat/output/hl.both.anchors.rds
+
+hl.both.combined <- IntegrateData(anchorset = hl.both.anchors, dims = 1:20) # memory-intensive step
+
+# saved on GSC projects space: /home/shung/share/projects/shung/lsarp_hl_relapse_sc/seurat/output/hl.both.combined.rds
+
+```
+
+## Output from finding integration anchors between diagnostic + relapse datasets
+
+```{r}
+#Computing 2000 integration features
+#Scaling features for provided objects
+#  |++++++++++++++++++++++++++++++++++++++++++++++++++| 100% elapsed=02m 17s
+#Finding all pairwise anchors
+#  |                                                  | 0 % ~calculating  Running CCA
+#Merging objects
+#Finding neighborhoods
+#Finding anchors
+#	Found 150263 anchors
+#Filtering anchors
+#	Retained 20853 anchors
+#  |++++++++++++++++++++++++++++++++++++++++++++++++++| 100% elapsed=04h 47m 05s
 ```
 
 ## ###############################################
@@ -236,9 +390,150 @@ hl_relapse.combined <- IntegrateData(anchorset = hl_relapse.anchors, dims = 1:20
 ## ###############################################
 
 ```{r}
-# using MNN Correct, integrate datasets by BATCH (GSCFlowcell) for HL relapse cases
+library(batchelor)
+
+# 1. Perform pre-batch-correction steps: filtering
+#   and for each batch: normalization, (scaling?) and finding highly variable genes (HVG)
+hl_relapse.merged[["percent.mt"]] <- PercentageFeatureSet(hl_relapse.merged, pattern = "^MT-")
+hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
+
+# split relapse cases by batch
+hl_relapse.split <- SplitObject(hl_relapse.merged, split.by = "batch") # returns a list of Seurat objects
+
+hl_relapse.split <- lapply(X = hl_relapse.split, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+hl_relapse.sce <- vector('list', length(hl_relapse.split))
+  
+# Convert Seurat objects into SingleCellExperiment objects
+for (i in 1:length(hl_relapse.split)) {
+ hl_relapse.sce[[i]] <- as.SingleCellExperiment(hl_relapse.split[[i]]) 
+}
+
+# 2. Then, using MNN Correct, using the HVG as input into MNN, batch-correct the data
+hl_relapse.mnn_correct <- mnnCorrect(hl_relapse.sce[[1]],
+                                     hl_relapse.sce[[2]],
+                                     hl_relapse.sce[[3]],
+                                     hl_relapse.sce[[4]],
+                                     hl_relapse.sce[[5]])
+
+# 3. Perform PCA and visualization
+
+# Run standard workflow of visualization and clustering
+hl_relapse.merged <- ScaleData(hl_relapse.merged)
+hl_relapse.merged <- RunPCA(hl_relapse.merged, npcs = 30)
+
+# UMAP and clustering
+hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "pca", dims = 1:20)
+hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "pca", dims = 1:20)
+hl_relapse.merged <- FindClusters(hl_relapse.merged, resolution = 0.5)
+
+# Visualization
+p.MNN.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
+p.MNN.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
 
 
+```
+
+## ###############################################
+## Batch correction method 3: FastMNN
+## ###############################################
+
+```{r}
+hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
+hl_relapse.merged <- NormalizeData(hl_relapse.merged)
+hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged)
+hl_relapse.merged <- RunFastMNN(object.list = SplitObject(hl_relapse.merged, split.by = "batch"))
+hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "mnn", dims = 1:30)
+hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "mnn", dims = 1:30)
+hl_relapse.merged <- FindClusters(hl_relapse.merged)
+saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
+#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
+
+#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
+p.fastMNN.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
+p.fastMNN.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
+p.fastMNN.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
+```
+
+## And same thing for diagnostic
+
+```{r}
+hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
+
+hl_diag.merged <- NormalizeData(hl_diag.merged)
+hl_diag.merged <- FindVariableFeatures(hl_diag.merged)
+hl_diag.merged <- RunFastMNN(object.list = SplitObject(hl_diag.merged, split.by = "batch"))
+hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "mnn", dims = 1:30)
+hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "mnn", dims = 1:30)
+hl_diag.merged <- FindClusters(hl_diag.merged)
+#saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
+#hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
+
+#DimPlot(hl_diag.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
+p.fastMNN.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
+p.fastMNN.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
+#p.fastMNN.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
+
+```
+
+## ###############################################
+## Batch correction method 4: Harmony
+## ###############################################
+
+```{r}
+hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
+hl_relapse.merged <- NormalizeData(hl_relapse.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
+hl_relapse.merged <- RunHarmony(hl_relapse.merged, group.by.vars = "batch")
+hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "harmony", dims = 1:30)
+hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
+saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
+#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
+
+#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
+p.harmony.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
+p.harmony.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
+p.harmony.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
+
+```
+
+```{r}
+hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
+
+hl_diag.merged <- NormalizeData(hl_diag.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
+hl_diag.merged <- RunHarmony(hl_diag.merged, group.by.vars = "batch")
+hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "harmony", dims = 1:30)
+hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
+#saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_25-merged-harmony.rds")
+#hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
+
+#DimPlot(hl_diag.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
+p.harmony.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
+p.harmony.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
+#p.harmony.celltype <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "celltype")
+```
+
+## ###############################################
+## Batch correction method 5: LIGER
+## ###############################################
+
+```{r}
+# will have to try another day - having trouble installing the package
+
+hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
+hl_relapse.merged <- NormalizeData(hl_relapse.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
+hl_relapse.merged <- RunHarmony(hl_relapse.merged, group.by.vars = "batch")
+hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "harmony", dims = 1:30)
+hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
+saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
+#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
+
+#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
+p.harmony.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
+p.harmony.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
+p.harmony.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
 
 ```
 
@@ -276,6 +571,11 @@ scatter.1 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA",  feature
 scatter.2 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 CombinePlots(plots = list(scatter.1, scatter.2))
 
+# Filter out cells that have between 200-2500 unique features / genes and have less than 20 % mitochondria
+hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
+# Now working with 80,831 cells across 25 samples (average 3.2K cells)
+# or 76,607 cells using < 20% MT filter (average 3K cells)
+
 ### And same thing for diagnostic dataset
 
 hl_diag.merged[["percent.mt"]] <- PercentageFeatureSet(hl_diag.merged, pattern = "^MT-")
@@ -287,10 +587,6 @@ VlnPlot(hl_diag.merged,
         sort = "increasing", log = FALSE,
         ncol = 2, pt.size = 0)
 
-# Filter out cells that have between 200-2500 unique features / genes and have less than 20 % mitochondria
-hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
-# Now working with 80,831 cells across 25 samples (average 3.2K cells)
-# or 76,607 cells using < 20% MT filter (average 3K cells)
 ```
 
 ## (2) Normalize, scale and find variable features
@@ -466,7 +762,7 @@ DimPlot(hl_relapse.merged, label = TRUE) + NoLegend()
 #saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-sctransform_workflow.rds") # 2.8 Gb
 
 # read back in if necessary
-hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-sctransform_workflow.rds")
+hl_relapse.merged.sct <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-sctransform_workflow.rds")
 ```
 
 ## Find differentially expressed features (cluster biomarkers)
@@ -721,7 +1017,7 @@ grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 
 ```{r}
 # Tomo's latest mappings (as of June 30, 2020)
-hl_relapse.merged <- RenameIdents(hl_relapse.merged, 
+hl_relapse.merged.sct <- RenameIdents(hl_relapse.merged.sct, 
                            `0` = "B cells", 
                            `1` = "B cells", 
                            `2` = "Helper T cells?", 
@@ -761,7 +1057,7 @@ DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE, pt.size = 0.2) + No
 library(reshape2)
 
 # Retrieve cluster assignments (identities) for cell barcodes in cHL-LSARP-09, 10, 11, 12, 19, 20, 25, and 26
-cluster.mappings <- read.table("~/Documents/sc_HL_relapse/data/hl_relapse-cluster_annotations.txt", sep = "\t", header = TRUE)
+cluster.mappings <- read.table("~/Documents/sc_HL_relapse/data/relapse/hl_relapse-cluster_annotations.txt", sep = "\t", header = TRUE)
 gsc.data <- read.table("~/Documents/sc_HL_relapse/data/relapse/library_info-relapse-cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
 
 # merge dataframes to combine barcode, cluster id, and cell type annotation
@@ -770,6 +1066,9 @@ clusters.annotated <- merge(clusters.df, cluster.mappings, by = "cluster")
 
 # extract sample id so we can more easily filter for samples of interest
 clusters.annotated <- cbind(clusters.annotated, colsplit(clusters.annotated$barcode_sample, pattern = "_", names = c("barcode", "sample_id")))
+
+# save for future use
+write.table(clusters.annotated, "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/hl_relapse-merged.sct-clusters.annotated.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 
 # extract the essential columns
 keeps <- c("sample_id", "barcode", "cluster", "cell_type")

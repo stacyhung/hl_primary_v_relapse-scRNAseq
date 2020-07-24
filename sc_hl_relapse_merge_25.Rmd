@@ -577,67 +577,78 @@ grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 ## Rename clusters based on feature plots
 
 ```{r}
-
 # Tomo's latest mappings (as of June 30, 2020)
-
-#Cluster 0: B cells
-#Cluster 1: B cells
-#Cluster 2: Helper T cells?
-#Cluster 3: B cells
-#Cluster 4: Naïve T cells
-#Cluster 5: B cells
-#Cluster 6: Naïve T cells
-#Cluster 7: Regulatory T cells (Tregs)
-#Cluster 8: Helper T cells
-#Cluster 9: B cells
-#Cluster 10:Cytotoxic T cells (CTL)
-#Cluster 11: B cells
-#Cluster 12: Naïve T cells
-#Cluster 13: B cells
-#Cluster 14: Naïve T cells
-#Cluster 15: B cells
-#Cluster 16: B cells
-#Cluster 17: Helper T cells (TFH??)
-#Cluster 18: Helper T cells?
-#Cluster 19: progenitor?
-#Cluster 20: NK cells
-#Cluster 21: T-regs?
-#Cluster 22: progenitor?
-#Cluster 23: Macrophage
-#Cluster 24: Plasma cell
-#Cluster 25:Plasma cell
-#Cluster 26:Plasmacytoid dendritic cells (pDC)
-
-
-hl_relapse.merged.temp <- RenameIdents(hl_relapse.merged, 
-                            `0` = "B cells",
-                            `1` = "B cells",
-                           # `2` = "",
-                            `3` = "B cells",
-                            `4` = "Naive T cells",
-                            `5` = "B cells",
-                            `6` = "Naive T cells",
-                           # `7` = "",
-                           # `8` = "",
-                            `9` = "B cells",
-                            `10` = "Effector molecules / Granzymes",
-                            `11` = "B cells",
-                            `12` = "Naive T cells",
-                            `13` = "B cells",
-                            `14` = "Naive T cells",
-                            `15` = "B cells",
-                            `16` = "B cells",
-                           # `17` = "",
-                           # `18` = "",
-                            `19` = "Progenitors",
-                            `20` = "NK cells",
-                           # `21` = "",
-                            `22` = "Progenitors",
-                            `23` = "Macrophages / Progenitors",
-                            `24` = "Plasma cells", 
-                            `25` = "Plasma cells",
-                            `26` = "Macrophages / Plasmacytoid DCs"
+hl_relapse.merged <- RenameIdents(hl_relapse.merged, 
+                           `0` = "B cells", 
+                           `1` = "B cells", 
+                           `2` = "Helper T cells?", 
+                           `3` = "B cells",
+                           `4` = "Naïve T cells", 
+                           `5` = "B cells",
+                           `6` = "Naïve T cells",
+                           `7` = "Regulatory T cells (Tregs)",
+                           `8` = "Helper T cells",
+                           `9` = "B cells",
+                           `10` = "Cytotoxic T cells (CTL)",
+                           `11` = "B cells",
+                           `12` = "Naïve T cells",
+                           `13` = "B cells",
+                           `14` = "Naïve T cells",
+                           `15` = "B cells",
+                           `16` = "B cells",
+                           `17` = "Helper T cells (TFH?)",
+                           `18` = "Helper T cells?",
+                           `19` = "progenitor?",
+                           `20` = "NK cells",
+                           `21` = "T-regs?",
+                           `22` = "progenitor?",
+                           `23` = "Macrophage",
+                           `24` = "Plasma cell",
+                           `25` = "Plasma cell",
+                           `26` = "Plasmacytoid dendritic cells (pDC)"
                             )
+
+# Now plot the new annotations
+DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE, pt.size = 0.2) + NoLegend()
+```
+
+## Special request from Richard Corbett - what are the cell types for each barcode?
+
+```{r}
+library(reshape2)
+
+# Retrieve cluster assignments (identities) for cell barcodes in cHL-LSARP-09, 10, 11, 12, 19, 20, 25, and 26
+cluster.mappings <- read.table("~/Documents/sc_HL_relapse/data/hl_relapse-cluster_annotations.txt", sep = "\t", header = TRUE)
+gsc.data <- read.table("~/Documents/sc_HL_relapse/data/relapse/library_info-relapse-cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
+
+# merge dataframes to combine barcode, cluster id, and cell type annotation
+colnames(clusters.df) <- c("barcode_sample", "cluster")
+clusters.annotated <- merge(clusters.df, cluster.mappings, by = "cluster")
+
+# extract sample id so we can more easily filter for samples of interest
+clusters.annotated <- cbind(clusters.annotated, colsplit(clusters.annotated$barcode_sample, pattern = "_", names = c("barcode", "sample_id")))
+
+# extract the essential columns
+keeps <- c("sample_id", "barcode", "cluster", "cell_type")
+clusters.annotated <- clusters.annotated[ , keeps ]
+
+# now extract samples of interest
+samples.keep <- c("cHL-LSARP-09", "cHL-LSARP-10", "cHL-LSARP-11", "cHL-LSARP-12",
+                  "cHL-LSARP-19", "cHL-LSARP-20", "cHL-LSARP-25", "cHL-LSARP-26")
+clusters.annotated.RC <- filter(clusters.annotated, clusters.annotated$sample_id %in% samples.keep)
+
+# sort by sample id then cluster
+clusters.annotated.RC <- clusters.annotated.RC[order(clusters.annotated.RC$sample_id, clusters.annotated.RC$cluster), ]
+
+# add library information
+gsc.library <- gsc.data[ c("Sample", "Library", "GSCPool") ]
+colnames(gsc.library) <- c("sample_id", "gsc_library", "gsc_pool")
+clusters.annotated.RC <- merge(clusters.annotated.RC, gsc.library, by = "sample_id")
+keeps <- c("sample_id", "gsc_library", "gsc_pool", "barcode", "cluster", "cell_type")
+clusters.annotated.RC <- clusters.annotated.RC[ , keeps]
+
+# write to output
+write.table(clusters.annotated.RC, "~/Documents/sc_HL_relapse/for_Richard/lsarp_hl_relapse-annotations-RC_samples.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 ```
 
 

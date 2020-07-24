@@ -1,0 +1,580 @@
+---
+title: "Paired HL analysis (diagnostic & relapse)"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=8, fig.height=6, echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(scater)
+library(scran)
+library(DropletUtils)
+library(dplyr)
+library(Matrix)
+library(DT)
+library(reshape2)
+library(pander)
+library(pheatmap)
+library(hues)
+library(data.table)
+library(RColorBrewer)
+library(cofeatureR)
+library(grid)
+library(gridExtra)
+```
+
+## Background
+
+Analyze 10X transcriptome data for all HL samples combined. Also include reactive lymph node (RLN) samples and HL cell lines (KMH2 and L-1236) for comparison. Omit the pleural effusion sample and the cell lines.
+
+```{r}
+working.dir <- "~/share/projects/lchong/HL_scRNAseq/NextSeq_pairs/"
+scater.dir <- paste0(working.dir, "scater/paired_analysis/")
+dir.create(scater.dir, recursive = TRUE, showWarnings = FALSE)
+
+lib.info <- read.delim(paste0(working.dir, "library_info.txt"), stringsAsFactors = FALSE)
+datatable(lib.info)
+```
+
+Create a SingleCellExperiment object holding this data using the scater package.
+
+```{r}
+rna.dir <- "~/share/projects/lchong/HL_scRNAseq/NextSeq_5prime/"
+in.dirs <- paste0(rna.dir, lib.info$SampleID, "/outs/filtered_feature_bc_matrix/")
+names(in.dirs) <- lib.info$SampleID
+
+# Read the counts into a SingleCellExperiment object
+source(paste0(working.dir, "scripts/read10xCountsUpdated.R"))
+(sc.obj <- read10xCountsUpdated(in.dirs))
+
+# Add annotation about samples
+colData(sc.obj) <- cbind(colData(sc.obj), lib.info[match(sc.obj$dataset, lib.info$Sample), c("ResID", "EBVStatus", "Chip", "Type")])
+
+# Name rows by gene name instead of ID
+rownames(sc.obj) <- uniquifyFeatureNames(rowData(sc.obj)$id, rowData(sc.obj)$symbol)
+colnames(sc.obj) <- paste(sc.obj$barcode, sc.obj$dataset, sep = "_")
+
+# Save raw object for future use
+dir.create(paste0(scater.dir, "data"), recursive = TRUE, showWarnings = FALSE)
+save(sc.obj, file = paste0(scater.dir, "data/merged_sc_obj_raw.Rdata"))
+```
+
+Read in VDJ annotation data.
+
+```{r}
+# Add VDJ annotation
+vdj.dir <- "~/share/projects/lchong/HL_scRNAseq/NextSeq_TCR/"
+all.clonotypes <- data.frame()
+for (s in lib.info$SampleID) {
+	s.in <- paste0(vdj.dir, s, "/outs/filtered_contig_annotations.csv")
+	s.df <- read.csv(s.in, stringsAsFactors = FALSE)
+	s.df <- filter(s.df, high_confidence == "True", productive == "True")
+	s.df <- cbind(sample = s, s.df)
+	s.df <- mutate(s.df, name = paste(barcode, sample, sep = "_"))
+	if (nrow(all.clonotypes) < 1) { all.clonotypes <- s.df } else { all.clonotypes <- rbind(all.clonotypes, s.df) }
+}
+```
+
+## Filtering cells
+
+Perform some filtering on the cells. Remove cells with more than 20% of reads in mitochondrial genes, and those with number of genes more than 3 median-absolute-deviations away from the mean.
+
+```{r}
+load(file = paste0(scater.dir, "data/merged_sc_obj_raw.Rdata"))
+sc.obj <- calculateQCMetrics(sc.obj)
+
+mito.genes <- grep("^MT-", rownames(sc.obj), value = TRUE)
+percent.mito <- Matrix::colSums(counts(sc.obj)[mito.genes,]) / Matrix::colSums(counts(sc.obj))
+colData(sc.obj)$percent_mito <- percent.mito
+keep.mito <- sc.obj$percent_mito < 0.2
+```
+
+Due to mitochondrial content, `r length(which(!keep.mito))` cells will be removed.
+
+```{r}
+keep.nGene <- rep(NA, ncol(sc.obj))
+for (d in unique(colData(sc.obj)$dataset)) {
+	d.idx <- which(colData(sc.obj)$dataset == d)
+	d.keep.nGene <- !isOutlier(sc.obj$total_features[d.idx], nmads =  3, type = "both", log = TRUE)
+	keep.nGene[d.idx] <- d.keep.nGene
+}
+```
+
+The total genes filter removes `r length(which(!keep.nGene))` cells.
+
+```{r}
+sc.obj <- sc.obj[,keep.mito & keep.nGene]
+save(sc.obj, file = paste0(scater.dir, "data/merged_sc_obj_raw_filtered.Rdata"))
+
+all.clonotypes <- filter(all.clonotypes, name %in% colnames(sc.obj))
+write.table(all.clonotypes, paste0(scater.dir, "data/merged_sc_clonotypes.txt"), quote = F, sep = "\t", row.names = F, col.names = T)
+```
+
+After filtering, there are `r ncol(sc.obj)` cells remaining.
+
+## Normalization
+
+Perform normalization using the computeSumFactors function from the scran package. This adjusts the counts using a pooled method described by Lun et al (https://genomebiology.biomedcentral.com/articles/10.1186/s13059-016-0947-7).
+
+```{r}
+# Load the object
+load(file = paste0(scater.dir, "data/merged_sc_obj_raw_filtered.Rdata"))
+
+# Compute size factors
+time.start <- proc.time()
+set.seed(100)
+sc.clusters <- quickCluster(sc.obj, method = "igraph", min.mean = 0.1, irlba.args = list(maxit = 1000))
+time.end <- proc.time()
+(clust.time <- time.end - time.start)
+colData(sc.obj)$quick_cluster <- sc.clusters
+sc.obj <- computeSumFactors(sc.obj, min.mean = 0.1, cluster = sc.clusters)
+sc.obj <- sc.obj[,which(sizeFactors(sc.obj) >= 0)]
+
+# Normalize the data (uses the computed size factors)
+sc.obj <- normalize(sc.obj)
+```
+
+Perform batch correction (not necessary in this dataset because all were prepared on the same chip).
+
+```{r}
+# fit <- trendVar(sc.obj, use.spikes = FALSE, loess.args = list(span = 0.05))
+# decomp <- decomposeVar(fit = fit)
+# keep.bio <- decomp$bio > 0
+# 
+# # Remove batch effects with MNN method
+# chips.ordered <- names(sort(table(sc.obj$Chip), decreasing = TRUE))
+# mnn.mats <- list()
+# cell.order <- c()
+# for (chip in chips.ordered) {
+# 	chip.cells <- which(sc.obj$Chip == chip)
+# 	mnn.mats[[chip]] <- logcounts(sc.obj)[keep.bio, chip.cells]
+# 	cell.order <- c(cell.order, chip.cells)
+# }
+# time.start <- proc.time()
+# set.seed(100)
+# mnn.out <- do.call(fastMNN, c(mnn.mats, list(k = 20, d = 50)))
+# time.end <- proc.time()
+# (mnn.time <- time.end - time.start)
+# 
+# # Save the MNN-corrected data into the SCE object
+# reducedDim(sc.obj, "MNN") <- mnn.out$corrected[order(cell.order),]
+```
+
+## Dimensionality reduction
+
+```{r}
+dir.create(paste0(scater.dir, "plots/"), recursive = TRUE, showWarnings = FALSE)
+```
+
+Perform PCA on the data using the top 1000 variable genes.
+
+```{r}
+# Run principal components analysis
+sc.obj <- runPCA(sc.obj, ntop = 1000, ncomponents = 50)
+sc.obj <- runTSNE(sc.obj, rand_seed = 100, use_dimred = "PCA", n_dimred = 10)
+
+save(sc.obj, file = paste0(scater.dir, "data/merged_sc_obj_normalized.Rdata"))
+```
+
+Look at the cells by dataset in tSNE space.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_PCA_by_dataset.pdf"), width = 7, height = 5)
+(plotPCA(sc.obj, colour_by = "dataset"))
+dev.off()
+```
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_PCA_by_sample.pdf"), width = 7, height = 5)
+(plotPCA(sc.obj, colour_by = "ResID"))
+dev.off()
+```
+
+Examine expression of B/T cell marker genes.
+
+```{r}
+bt.plots <- list(CD3D = plotPCA(sc.obj, colour_by = "CD3D"),
+								 MS4A1 = plotPCA(sc.obj, colour_by = "MS4A1"),
+								 CD68 = plotPCA(sc.obj, colour_by = "CD68"))
+pdf(paste0(scater.dir, "plots/all_PCA_BTmarkers.pdf"), width = 15, height = 4)
+(multiplot(plotlist = bt.plots, cols = 3))
+dev.off()
+```
+
+Now look at the cells by chip.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_PCA_by_chip.pdf"), width = 7, height = 5)
+(plotPCA(sc.obj, colour_by = "Chip"))
+dev.off()
+```
+
+Perform tSNE on the data, using the top 10 principal components as input.
+
+```{r}
+# Run tSNE
+pdf(paste0(scater.dir, "plots/all_tSNE_by_type.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "Type"))
+dev.off()
+```
+
+Examine how cells from each sample are distributed in tSNE space.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_tSNE_by_dataset.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "dataset"))
+dev.off()
+```
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_tSNE_by_sample.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "ResID"))
+dev.off()
+```
+
+Look at B/T cell marker expression in tSNE space.
+
+```{r}
+bt.plots <- list(CD3D = plotTSNE(sc.obj, colour_by = "CD3D"),
+								 MS4A1 = plotTSNE(sc.obj, colour_by = "MS4A1"),
+								 CD68 = plotTSNE(sc.obj, colour_by = "CD68"))
+pdf(paste0(scater.dir, "plots/all_tSNE_BTmarkers.pdf"), width = 15, height = 4)
+(multiplot(plotlist = bt.plots, cols = 3))
+dev.off()
+```
+
+Look at expression of apoptosis genes in tSNE space.
+
+```{r}
+apop.genes <- read.delim(paste0(working.dir, "data/apoptosis_genes.txt"), stringsAsFactors = FALSE)
+
+colData(sc.obj)$apop_max <- apply(logcounts(sc.obj)[match(apop.genes$gene, rownames(sc.obj)),], 2, max, na.rm = TRUE)
+pdf(paste0(scater.dir, "plots/all_tSNE_apoptosis_markers.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "apop_max"))
+dev.off()
+```
+
+Look at expression of cell cycle genes in tSNE space.
+
+```{r}
+cc.genes <- read.delim(paste0(working.dir, "data/cell_cycle_genes.txt"), stringsAsFactors = FALSE)
+
+cc.plots <- list()
+for (ccg in cc.genes$gene) {
+	print(paste0("Processing: ", ccg))
+	cc.plots[[ccg]] <- plotTSNE(sc.obj, colour_by = ccg)
+}
+pdf(paste0(scater.dir, "plots/all_tSNE_cellcycle_markers.pdf"), width = 12, height = 6)
+(multiplot(plotlist = cc.plots, cols = 3))
+dev.off()
+```
+
+Look at expression of some specific genes.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_tSNE_CD8A.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "CD8A"))
+dev.off()
+
+pdf(paste0(scater.dir, "plots/all_tSNE_CD8B.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "CD8B"))
+dev.off()
+
+pdf(paste0(scater.dir, "plots/all_tSNE_NCAM1.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "NCAM1"))
+dev.off()
+
+pdf(paste0(scater.dir, "plots/all_tSNE_LAG3.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "LAG3"))
+dev.off()
+
+pdf(paste0(scater.dir, "plots/all_tSNE_CD68.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "CD68"))
+dev.off()
+```
+
+Examine the expression of T cell markers.
+
+```{r fig.width=14, fig.height=12}
+tcell.genes <- scan(paste0(working.dir, "data/Tcell_genes.txt"), what = "character")
+tcell.plots <- list()
+for (tg in tcell.genes) {
+	tcell.plots[[tg]] <- plotTSNE(sc.obj, colour_by = tg)
+}
+pdf(paste0(scater.dir, "plots/all_tSNE_Tcell.pdf"), width = 14, height = 4)
+(multiplot(plotlist = tcell.plots, cols = 3))
+dev.off()
+```
+
+Examine the expression of B cell markers.
+
+```{r fig.width=14, fig.height=12}
+bcell.genes <- scan(paste0(working.dir, "data/Bcell_genes.txt"), what = "character")
+bcell.plots <- list()
+for (bg in bcell.genes) {
+	bcell.plots[[bg]] <- plotTSNE(sc.obj, colour_by = bg)
+}
+pdf(paste0(scater.dir, "plots/all_tSNE_Bcell.pdf"), width = 14, height = 4)
+(multiplot(plotlist = bcell.plots, cols = 3))
+dev.off()
+```
+
+Look at the expression of IGL/IGK to see if there is a bias in the B cell clusters.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_tSNE_IGKC.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "IGKC"))
+dev.off()
+
+igl.genes <- rownames(sc.obj)[grep("^IGLC[[:digit:]]", rownames(sc.obj))]
+
+colData(sc.obj)$IGLC_max <- apply(logcounts(sc.obj)[igl.genes,], 2, max, na.rm = TRUE)
+pdf(paste0(scater.dir, "plots/all_tSNE_IGLC.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "IGLC_max"))
+dev.off()
+```
+
+Look at cells in tSNE space by total features.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_tSNE_by_features.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "total_features"))
+dev.off()
+```
+
+Plot expression of each sample individually.
+
+```{r}
+per.dir <- paste0(scater.dir, "plots/per_sample/")
+dir.create(per.dir, showWarnings = FALSE, recursive = TRUE)
+
+for (my.case in unique(sc.obj$ResID)) {
+	mc.obj <- sc.obj[,which(sc.obj$ResID == my.case)]
+	
+	pdf(paste0(per.dir, my.case, "_tSNE_by_dataset.pdf"), width = 7, height = 5)
+	print(plotTSNE(mc.obj, colour_by = "dataset"))
+	dev.off()
+	
+	pdf(paste0(per.dir, my.case, "_tSNE_by_timepoint.pdf"), width = 7, height = 5)
+	print(plotTSNE(mc.obj, colour_by = "Type"))
+	dev.off()
+	
+	pdf(paste0(per.dir, my.case, "_tSNE_by_CD3D.pdf"), width = 7, height = 5)
+	print(plotTSNE(mc.obj, colour_by = "CD3D"))
+	dev.off()
+	
+	pdf(paste0(per.dir, my.case, "_tSNE_by_MS4A1.pdf"), width = 7, height = 5)
+	print(plotTSNE(mc.obj, colour_by = "MS4A1"))
+	dev.off()
+}
+```
+
+## Cluster the cells
+
+Use the Phenograph python package to cluster the cells. Perform clustering using the top 10 principal components.
+
+```{r}
+load(paste0(scater.dir, "data/merged_sc_obj_normalized.Rdata"))
+
+library(reticulate)
+use_python("/projects/clc/usr/anaconda/5.1.0/bin/python")
+phenograph <- import("phenograph")
+phenograph.res <- phenograph$cluster(sc.obj@reducedDims$PCA[,c(1:10)])
+colData(sc.obj)$cluster <- as.factor(phenograph.res[[1]])
+```
+
+See where the clusters fall in tSNE space.
+
+```{r}
+# Plot tSNE colored by these clusters
+pdf(paste0(scater.dir, "plots/all_tSNE_by_cluster.pdf"), width = 7, height = 5)
+(plotTSNE(sc.obj, colour_by = "cluster"))
+dev.off()
+```
+
+Look at the composition of the clusters based on dataset.
+
+```{r}
+sample.cols <- iwanthue(n = length(unique(sc.obj$dataset)), 0, 360, 30, 80, 35, 80)
+names(sample.cols) <- unique(sc.obj$dataset)
+
+# Plot the composition of the clusters
+cluster.df <- as.data.frame(colData(sc.obj))
+pdf(paste0(scater.dir, "plots/all_cluster_by_sample.pdf"), width = 8, height = 6)
+(ggplot(cluster.df, aes(x = cluster, fill = dataset)) +
+	geom_histogram(stat = "count") +
+	scale_fill_manual(values = sample.cols) +
+	labs(x = "Cluster", y = "Number of cells") +
+	theme_bw())
+dev.off()
+```
+
+See how cells are distributed throughout the clusters by timepoint.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_cluster_by_type.pdf"), width = 6, height = 4.5)
+(ggplot(cluster.df, aes(x = cluster, fill = Type)) +
+	geom_histogram(stat = "count") +
+	labs(x = "Cluster", y = "Number of cells") +
+	theme_bw())
+dev.off()
+```
+
+See how cells are distributed throughout the clusters by sample.
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_cluster_by_dataset.pdf"), width = 6, height = 4.5)
+(ggplot(cluster.df, aes(x = cluster, fill = dataset)) +
+	geom_histogram(stat = "count") +
+	labs(x = "Cluster", y = "Number of cells") +
+	theme_bw())
+dev.off()
+```
+
+```{r}
+pdf(paste0(scater.dir, "plots/all_cluster_by_sample.pdf"), width = 6, height = 4.5)
+(ggplot(cluster.df, aes(x = cluster, fill = ResID)) +
+	geom_histogram(stat = "count") +
+	labs(x = "Cluster", y = "Number of cells") +
+	theme_bw())
+dev.off()
+```
+
+```{r}
+save(sc.obj, file = paste0(scater.dir, "data/merged_sc_obj_clustered.Rdata"))
+```
+
+## Perform differential expression
+
+Use the findMarkers package from the scran package to identify genes differentially expressed in each cluster.
+
+```{r}
+load(file = paste0(scater.dir, "data/merged_sc_obj_clustered.Rdata"))
+
+n.top.de <- 20
+
+all.markers <- findMarkers(logcounts(sc.obj), cluster = colData(sc.obj)$cluster, direction = "up")
+de.dir <- paste0(scater.dir, "differential_expression/all_cells/")
+dir.create(de.dir, showWarnings = FALSE, recursive = TRUE)
+marker.df <- data.frame()
+for (i in 1:length(all.markers)) {
+	i.df <- cbind(Gene = rownames(all.markers[[i]]), all.markers[[i]])
+	write.table(i.df, file = paste0(de.dir, "DE_cluster_", names(all.markers)[i], ".txt"),
+							quote = FALSE, sep = "\t", row.names = FALSE, col.names = TRUE)
+	
+	i.df <- i.df[1:n.top.de, c("Gene", "Top", "FDR")]
+	i.df <- data.frame(Cluster = names(all.markers)[i], i.df)
+	if (nrow(marker.df) < 1) { marker.df <- i.df } else { marker.df <- rbind(marker.df, i.df) }
+}
+```
+
+Look at the top 20 genes in each cell cluster.
+
+```{r fig.height=14}
+all.cluster.means <- data.table()
+for (i.clust in levels(sc.obj$cluster)) {
+	i.clust.means <- data.frame(rowMeans(logcounts(sc.obj)[,which(sc.obj$cluster == i.clust)]))
+	colnames(i.clust.means) <- i.clust
+	rownames(i.clust.means) <- rownames(sc.obj)
+	if (nrow(all.cluster.means) < 1) {
+		all.cluster.means <- i.clust.means
+	}
+	else {
+		all.cluster.means <- cbind(all.cluster.means, i.clust.means)
+	}
+}
+pdf(paste0(scater.dir, "plots/all_top", n.top.de, "_hm.pdf"), width = 8, height = 14)
+(pheatmap(as.matrix(all.cluster.means[unique(marker.df$Gene),]), scale = "row", 
+					fontsize_row = 7, cluster_rows = FALSE, cluster_cols = FALSE))
+dev.off()
+```
+
+## Assign labels to the clusters
+
+Create a heatmap of expression for some known marker genes to estimate which cell type each cluster represents.
+
+```{r}
+comp.func.data <- read.delim(paste0(working.dir, "data/component_genes_with_functions.txt"), stringsAsFactors = FALSE)
+comp.func.data$Component <- as.factor(comp.func.data$Component)
+
+comp.func.ann <- comp.func.data[,"Component", drop = FALSE]
+rownames(comp.func.ann) <- comp.func.data$Gene
+comp.func.ann.colors <- list(Component = iwanthue(nlevels(comp.func.data$Component)))
+names(comp.func.ann.colors$Component) <- levels(comp.func.data$Component)
+comp.func.rownames <- apply(comp.func.data, 1, function(x) {if (x["Alt_name"] == "") { return(x["Gene"]) } else { return(paste0(x["Gene"], " (", x["Alt_name"], ")")) }})
+
+gaps.row <- which(!duplicated(comp.func.ann$Component))[-1] - 1
+
+all.comp.mat <- as.matrix(all.cluster.means[comp.func.data$Gene,])
+pdf(paste0(scater.dir, "plots/all_component_genes_hm.pdf"), width = 8, height = 10)
+(pheatmap(all.comp.mat, scale = "row", cluster_rows = FALSE, labels_row = comp.func.rownames, gaps_row = gaps.row,
+					annotation_colors = comp.func.ann.colors, annotation_row = comp.func.ann, annotation_names_row = FALSE))
+dev.off()
+
+pdf(paste0(scater.dir, "plots/all_component_genes_hm_noNorm.pdf"), width = 8, height = 10)
+(pheatmap(all.comp.mat, scale = "none", cluster_rows = FALSE, labels_row = comp.func.rownames, gaps_row = gaps.row,
+					annotation_colors = comp.func.ann.colors, annotation_row = comp.func.ann, annotation_names_row = FALSE))
+dev.off()
+```
+
+## Examine "dominant" clonotypes
+
+Take a look at the repeated clonotypes, and see what clusters they belong to.
+
+```{r}
+lag3 <- c("3")
+treg <- c("5")
+ctl <- c("11")
+
+subsets <- c("LAG3_Tregs" = lag3, "Other_Tregs" = treg, "CTLs" = ctl)
+
+for (s in lib.info$SampleID) {
+	s.dir <- paste0(scater.dir, "plots/", s, "/")
+	dir.create(s.dir, recursive = TRUE, showWarnings = FALSE)
+	s.clonotypes <- read.csv(paste0(vdj.dir, s, "/outs/clonotypes.csv"), stringsAsFactors = FALSE)
+	s.clonotypes <- filter(s.clonotypes, frequency > 1)
+	for (i in c(1:nrow(s.clonotypes))) {
+		i.clonotype <- s.clonotypes$clonotype_id[i]
+		i.clonotype.cells <- all.clonotypes %>% 
+			filter(sample == s & all.clonotypes$raw_clonotype_id == i.clonotype) %>% 
+			pull(name) %>% unique
+		i.idx <- which(colnames(sc.obj) %in% i.clonotype.cells)
+		if (length(i.idx) < 1) { next }
+		i.colData <- as.data.frame(colData(sc.obj)[i.idx,])
+		i.cluster.plot <- ggplot(i.colData, aes(x = cluster)) +
+			geom_bar(stat = "count") +
+			labs(x = "Cluster", y = "Number of cells with clonotype", title = i.clonotype) +
+			theme_bw()
+		pdf(paste0(s.dir, i.clonotype, "_clusters.pdf"), width = 4, height = 4)
+		print(i.cluster.plot)
+		dev.off()
+		
+		i.comp.mat <- as.matrix(logcounts(sc.obj)[comp.func.data$Gene, i.idx])
+		pdf(paste0(s.dir, i.clonotype, "_component_genes_hm.pdf"), width = 6, height = 10)
+		(pheatmap(i.comp.mat, scale = "none", cluster_rows = FALSE, cluster_cols = ifelse(length(i.idx) > 1, TRUE, FALSE), 
+							labels_row = comp.func.rownames, gaps_row = gaps.row, show_colnames = FALSE,
+							annotation_colors = comp.func.ann.colors, annotation_row = comp.func.ann, annotation_names_row = FALSE))
+		dev.off()
+	}
+}
+```
+
+Look at the prevalence of repeated clonotypes in different cluster types.
+
+```{r}
+lag3 <- c("3")
+treg <- c("5")
+ctl <- c("11")
+
+subsets <- c("LAG3_Tregs" = lag3, "Other_Tregs" = treg, "CTLs" = ctl)
+
+for (s in names(subsets)) {
+	s.cells <- colnames(sc.obj)[which(sc.obj$cluster %in% subsets[[s]])]
+	s.clonotypes <- all.clonotypes[]
+}
+```

@@ -15,16 +15,16 @@ library(dplyr)
 library(Seurat)
 library(tidyr)
 library(grid)
+library(ggplot2)
 ```
 
 0. Examine QC metrics
 
 ```{r}
-hl.relapse.metrics <- read.table("/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/metrics/all.8_relapse.metrics.txt", sep = "\t", header = TRUE, fill = TRUE)
-hl.relapse.metrics$Dataset <- "relapse"
-hl.primary.metrics <- read.table("/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/metrics/all.8_primary.metrics.txt", sep = "\t", header = TRUE, fill = TRUE)
-hl.primary.metrics$Dataset <- "primary"
-hl.metrics <- rbind (hl.primary.metrics, hl.relapse.metrics)
+#metrics.temp <- read.table("~/Documents/sc_HL_relapse/metrics/all.relapse.metrics.csv", sep = ",", header = TRUE, fill = TRUE)
+# write out as tabular format so we can remove commas in numbers
+#write.table(metrics.temp, "~/Documents/sc_HL_relapse/metrics/all.relapse.metrics.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+metrics <- read.table("~/Documents/sc_HL_relapse/metrics/all.relapse.metrics.txt", sep = "\t", header = TRUE, fill = TRUE)
 
 # Liz's favourite metrics:
   # 1. cells recovered --> "Estimated.Number.of.Cells"
@@ -36,24 +36,47 @@ hl.metrics <- rbind (hl.primary.metrics, hl.relapse.metrics)
   # "Fraction.Reads.in.Cells"
   # "Total.Genes.Detected"
 
-keeps <- c("SampleID", "Dataset", "Estimated.Number.of.Cells", "Mean.Reads.per.Cell", "Median.Genes.per.Cell", "Sequencing.Saturation", "Fraction.Reads.in.Cells", "Total.Genes.Detected")
-hl.metrics <- hl.metrics[c(keeps)]
+keeps <- c("SampleID", "Estimated.Number.of.Cells", "Mean.Reads.per.Cell", "Median.Genes.per.Cell", "Sequencing.Saturation", "Fraction.Reads.in.Cells", "Total.Genes.Detected")
+metrics <- metrics[c(keeps)]
+colnames(metrics) <- c("SampleID", "Est. Number of Cells", "Mean Reads / Cell", "Median Genes / Cell", "Sequencing Saturation (%)", "Fraction Reads in Cells (%)", "Total Genes Detected")
 
 # convert from wide to long
-hl.metrics.long <- gather(hl.metrics, metric, value, Estimated.Number.of.Cells:Total.Genes.Detected)
+metrics.long <- gather(metrics, metric, value, "Est. Number of Cells":"Total Genes Detected")
 
 # faceted barplot for metrics of interest, and bars coloured by relapse vs. primary
-p <- ggplot(hl.metrics.long, aes(x = SampleID, y = value, fill = Dataset)) + 
-      geom_bar(stat = "identity") + 
+p <- ggplot(metrics.long, aes(x = SampleID, y = value)) + 
+      geom_bar(stat = "identity", fill="steelblue", width = 0.8) + 
       facet_wrap( ~ metric, scales = "free") + 
       xlab("") + ylab("") + 
-      theme(axis.text.x = element_text(angle = 90,  hjust = 1, size = 8)) +
+      theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 8)) +
       theme(panel.spacing = unit(1, "lines"))
 ```
 
-1. Read in the PBMC dataset
+1. Read in the dataset
 
 ```{r}
+## Define dataset for analysis
+dataset_loc <- "~/Documents/projects/hl_sc_primary/cellranger-3.1.0/"
+ids <- c("04-32704", "08-23834", "09-25099", "10-16486", "10-20817", "10-39536", "11-11363", "12-10493", "12-39704", "13-35368")
+
+# Note that 10X has an aggr function that combines multiple samples into a single count matrix, but for Seurat analysis, this is actually counterproductive since we will lose sample ids, so we will read in by sample here:
+d10x.data <- sapply(ids, function(i) {
+  d10x <- Read10X(file.path(dataset_loc, i, "filtered_feature_bc_matrix/"))
+  colnames(d10x) <- paste(sapply(strsplit(colnames(d10x), split="-"), '[[', 1L), i, sep="-")
+                          d10x
+})
+
+experiment.data <- do.call("cbind", d10x.data)
+
+experiment.aggr <- CreateSeuratObject(
+  experiment.data,
+  project = "hl primary merged",
+  min.cells = 10,
+  min.features = 200,
+  names.field = 2,
+  names.delim = "\\-"
+)
+
 # the Read10X function reads output of cellranger pipeline from 10X and returns a UMI count matrix - values in this matrix represent number of molecules for each feature (gene/row) that are detected in each cell (column)
 hl_relapse.data <- Read10X("~/Documents/projects/lsarp_hl_sc_relapse/cellranger-3.1.0/aggr_libs_20191207/filtered_feature_bc_matrix/")
 # for this dataset (aggregrate of 8 relapse HL samples), the matrix is 33,538 (genes) x 37,215 (single cells)
@@ -84,6 +107,7 @@ hl_primary <- CreateSeuratObject(counts = hl_primary.data,
 
 hl_relapse$case_type <- "relapse"
 hl_primary$case_type <- "primary"
+
 ```
 
 Batch correction
@@ -177,10 +201,14 @@ DefaultAssay(hl.combined) <- "integrated"
 #hl.combined <- ScaleData(hl.combined, verbose = FALSE)
 # correct for batch effects and sequencing machine
 hl.combined <- ScaleData(hl.combined, vars.to.regress = c("Chip", "GSCFlowcell"), verbose = FALSE)
+hl_relapse <- ScaleData(hl_relapse, verbose = FALSE)
+
 hl.combined <- RunPCA(hl.combined, npcs = 30, verbose = FALSE)
+hl_relapse <- RunPCA(hl_relapse, npcs = 30, verbose = FALSE)
 
 # UMAP, t-SNE and clustering
 hl.combined <- RunUMAP(hl.combined, reduction = "pca", dims = 1:20) # default parameters
+hl_relapse <- RunUMAP(hl_relapse, reduction = "pca", dims = 1:20) # default parameters
 #hl.combined <- RunTSNE(hl.combined, reduction = "pca", dims = 1:20) # default parameters
 # optimized learning rate (n/12 = 48698/12 = 4058.167 > 200) - doesn't work for UMAP, no effect with tSNE
 #hl.combined <- RunTSNE(hl.combined, reduction = "pca", dims = 1:20, learning.rate = 4058)
@@ -188,6 +216,10 @@ hl.combined <- RunUMAP(hl.combined, reduction = "pca", dims = 1:20) # default pa
 # UMAP embedding parameters a = 0.9922 b = 1.112
 hl.combined <- FindNeighbors(hl.combined, reduction = "pca", dims = 1:20)
 hl.combined <- FindClusters(hl.combined, resolution = 0.5)
+
+hl_relapse <- FindNeighbors(hl_relapse, reduction = "pca", dims = 1:20)
+hl_relapse <- FindClusters(hl_relapse, resolution = 0.5)
+
 ```
 
 4c. Visualization
@@ -201,6 +233,9 @@ p1 <- DimPlot(hl.combined, reduction = "umap", group.by = "case_type")
 p2 <- DimPlot(hl.combined, reduction = "umap", label = TRUE)
 # show the two plots side by side
 plot_grid(p1, p2)
+
+# show umap coloured by sample
+p3 <- DimPlot(hl_relapse, reduction = "umap", group.by = "orig.ident")
 
 # show umap of each case case type, coloured by cluster
 DimPlot(hl.combined, reduction = "umap", split.by = "case_type")
@@ -270,14 +305,69 @@ FeaturePlot(hl.combined, features = c("SDC1", "NRP1", "GZMK"),  min.cutoff = "q9
 FeaturePlot(hl.combined, features = c("FOXP3", "IL2RA", "IKZF2", "CTLA4", "LAG3"), min.cutoff = "q9", split.by = "case_type") # clusters 5, 12
 
 # annotate clusters that have clear biomarker expression
-hl.combined <- RenameIdents(hl.combined, `19` = "Plasma Cells", `18` = "Plasmacytoid DC", `9` = "Effector Molecules")
+hl.combined <- RenameIdents(hl.combined, 
+                            `19` = "Plasma Cells", 
+                            `18` = "Plasmacytoid DC", 
+                            `9` = "Effector Molecules")
+# renaming second round:
+hl.combined <- RenameIdents(hl.combined, 
+                            `0` = "Plasma Cells", 
+                            `1` = "Plasmacytoid DC", 
+                            `2` = "Naive T cells",
+                            `3` = "Naive T cells",
+                            `4` = "B cells",
+                            `5` = "Tregs",
+                            `6` = "B cells",
+                            `7` = "B cells",
+                            `8` = "B cells",
+                            `10` = "Naive T cells",
+                            `11` = "Naive T cells",
+                            `12` = "Tregs",
+                            `13` = "B cells",
+                            `14` = "NK cells",
+                            `15` = "CD4 T cells",
+                            `16` = "germinal centre B cells",
+                            `17` = "macrophages",
+                            `Effector Molecules` = "Cytotoxic T cells")
+
 DimPlot(hl.combined, label = TRUE, repel = TRUE)
 
 # display expression dot plot to show conservation of biomarkers by cluster between primary and relapse cases
 #Idents(hl.combined) <- factor(Idents(hl.combined), levels = c("Mono/Mk Doublets", "pDC", "Eryth", "Mk", "DC", "CD14 Mono", "CD16 Mono", "B Activated", "B", "CD8 T", "NK", "T activated", "CD4 Naive T", "CD4 Memory T"))
 markers.to.plot <- c("CD3D", "CD8B", "CD4", "CD19", "MS4A1", "IGHD", "SDC1", "NCAM1", "CLEC4C", "NRP1", "CD68", "IL3RA", "IDO1", "CD34", "CCR7", "IL7R", "LEF1", "SELL", "CD44", "EOMES", "ID2", "TIGIT", "HAVCR2", "CTLA4", "LAG3", "CD274", "PDCD1", "GZMA", "GZMK", "ICOS", "ICOSLG", "CD28", "TNFRSF18", "TNFRSF8", "CD40LG", "FOXP3", "IL2RA", "IKZF2", "CXCR5", "BCL6", "KLRB1", "CCR4", "TBX21", "GATA3", "IL2", "IL4", "IFNG")
-DotPlot(hl.combined, features = rev(markers.to.plot), cols = c("blue", "red"), dot.scale = 8, 
-    split.by = "case_type") + RotatedAxis()
+
+Idents(hl.combined) <- factor(Idents(hl.combined), 
+                              levels = rev(c(
+                                         "CD4 T cells_primary", "CD4 T cells_relapse",
+                                         "Cytotoxic T cells_primary", "Cytotoxic T cells_relapse",
+                                         "Naive T cells_primary", "Naive T cells_relapse",
+                                         "Tregs_primary", "Tregs_relapse", 
+                                         "B cells_primary", "B cells_relapse",
+                                         "germinal centre B cells_primary", "germinal centre B cells_relapse",
+                                         "macrophages_primary", "macrophages_relapse",
+                                         "NK cells_primary", "NK cells_relapse",
+                                         "Plasmacytoid DC_primary", "Plasmacytoid DC_relapse",
+                                         "Plasma Cells_primary", "Plasma Cells_relapse"
+                                         )))
+
+DotPlot(hl.combined, 
+        features = rev(markers.to.plot), 
+        cols = c("blue", "red"), 
+        dot.scale = 8) + 
+  RotatedAxis()
+
+# plot expression by average expression of each gene
+cluster.averages <- AverageExpression(hl.combined, return.seurat = TRUE)
+DoHeatmap(cluster.averages, features = unlist(markers.to.plot), size = 3, draw.lines = FALSE)
+
+component.mappings <- readxl::read_excel("/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/data/component_genes_with_functions.xlsx", col_names = TRUE)
+
+# extract expression to plot in pheatmap
+expr.hl_markers <- hl.combined@assays[["RNA"]]
+# this command does the same thing:
+#counts.hl_markers <- GetAssayData(object = hl.combined, slot = "counts")
+
+
 ```
 
 Identify differentially expressed genes across conditions
@@ -287,6 +377,7 @@ Identify differentially expressed genes across conditions
 hl.combined$celltype.dataset <- paste(Idents(hl.combined), hl.combined$case_type, sep = "_")
 hl.combined$celltype <- Idents(hl.combined)
 Idents(hl.combined) <- "celltype.dataset"
+Idents(hl.combined) <- "celltype"
 
 # violin plot split by dataset (primary vs. relapse) per gene showing expression across clusters
 
@@ -307,19 +398,32 @@ CombinePlots(plots = plots, ncol = 1)
 
 # top differentially expressed genes in cluster 10 (primary cases only)
 markers.to.plot <- c("ISG15", "IFI6", "IFIT3", "IFI44L", "MX1", "IFIT1")
+plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2)
+
+# annotated genes that seem to be higher in primary vs. relapse
+markers.to.plot <- c("TNFSF10", "IL7R", "STAT1", "CCR7", "JUNB", "CD3E", "CD3G", "TRAC")
+plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+
+markers.to.plot <- c("TNFSF10", "IRF1")
+plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+
+#FeaturePlot(hl.combined, features = c("TBX21", "GATA3", "IL17A", "RORC", "LAG3", "CD4", "IRF1"), min.cutoff = "q9")
+
 
 # Now find differentially expression markers for each cluster
-b.cells <- subset(hl.combined, idents = c("0", "4", "6", "7", "8", "13"))
-Idents(b.cells) <- "case_type"
-avg.b.cells <- log1p(AverageExpression(b.cells, verbose = FALSE)$RNA)
-avg.b.cells$gene <- rownames(avg.b.cells)
+cluster10.cells <- subset(hl.combined, idents = c("10_primary", "10_relapse"))
+Idents(cluster10.cells) <- "case_type"
+avg.cluster10.cells <- log1p(AverageExpression(cluster10.cells, verbose = FALSE)$RNA)
+avg.cluster10.cells$gene <- rownames(avg.cluster10.cells)
+genes.to.label = c("CD8A", "CD8B", "TNFSF10", "GZMA", "GZMK")
+p <- ggplot(avg.cluster10.cells, aes(primary, relapse)) + geom_point() + ggtitle("cluster 10 cells")
+p <- LabelPoints(plot = p, points = genes.to.label, repel = TRUE, xnudge = 0, ynudge = 0)
 
-p1 <- ggplot(avg.b.cells, aes("primary", "relapse")) + geom_point() + ggtitle("B Cells")
-#p1 <- LabelPoints(plot = p1, points = genes.to.label, repel = TRUE)
-
-t.cells <- subset(hl.combined, idents = c("1", "2", "3", "5", "Effector Molecules", "10", "11", "12", "15"))
-Idents(t.cells) <- "case_type"
-
+cluster10.de_genes <- FindMarkers(hl.combined, ident.1 = "10_primary", ident.2 = "10_relapse", verbose = FALSE)
+write.table(cluster10.de_genes, "/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/seurat/output/cluster10_de_markers-primary_v_relapse.txt", quote = FALSE, sep = "\t")
 ```
 
 
