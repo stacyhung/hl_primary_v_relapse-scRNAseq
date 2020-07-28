@@ -583,7 +583,19 @@ saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_pl
 # Now plot the new annotations
 DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
 
-# rename clusters to only contain letters
+# create a barplot to show the numbers of cells in each cluster / component type
+celltype.numcells <- as.data.frame(table(hl.both.combined$celltype))
+colnames(celltype.numcells) <- c("celltype", "numcells")
+p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) + 
+      geom_bar(stat = "identity", width = 0.8, fill="darkblue") + 
+      xlab("") + ylab("") + 
+      ylim(0,60000) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+      theme(panel.spacing = unit(1, "lines")) + 
+      geom_text(aes(label=numcells), hjust=-0.1, vjust=0.5, size=4, color="gray47")+
+      coord_flip()
+
+# rename clusters to only contain letters (for DotPlot only)
 hl.both.combined  <- RenameIdents(hl.both.combined,
                                   `Plasma cells` = "plasmaCells",
                                   `Macrophages` = "macrophages",
@@ -618,8 +630,70 @@ DotPlot(
 
 ## Differential expression analysis
 
-```{r}
+Check out https://nbisweden.github.io/excelerate-scRNAseq/session-de/session-de-methods.html for a review of DE methods that can be applied to scRNAseq data (not just those integrated in Seurat)
 
+```{r}
+library(ggplot2)
+library(cowplot)
+theme_set(theme_cowplot())
+library(MAST)
+library(DESeq2)
+
+hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.annotated.rds")
+
+hl.both.combined$celltype.case <- paste(Idents(hl.both.combined), hl.both.combined$case.type, sep = "_")
+hl.both.combined$celltype <- Idents(hl.both.combined) # keep a copy of the cluster annotations
+Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main identity (for DE analysis)
+
+## try out all the differential expression methods:
+de.methods <- c("wilcox", # NA's for p-values --> generic method
+                "bimod", # low discriminatory power with p-value (mostly 0's)
+                "roc", # 0 or 1 are good; 0.5 is bad classifer
+                "t", # 9 / 54 genes have p-value > 0 (and < 0.05)
+                "LR", #  9 / 54 genes have p-value > 0 (and < 0.05)
+                "MAST", #  2 / 54 genes have p-value > 0 (and < 0.05) --> **the only scRNAseq-specific method
+                "DESeq2", # doesn't work --> designed for bulk RNAseq
+                "negbinom", # doesn't work --> generic method
+                "poisson" # doesn't work --> generic method
+)
+
+# initialize empty vector of results
+de.results <- vector('list', length(de.methods))
+
+# find DE genes between all diagnostic vs. all relapse cases (not cluster-specific) for each method
+for (i in 1:length(de.methods)) {
+  de.results[[i]] <- FindMarkers(hl.both.combined, ident.1 = "relapse", ident.2 = "diagnostic", 
+                          test.use = de.methods[i],
+                          min.pct = 0.25, logfc.threshold = 0.25)
+}
+
+de.diag_vs_rel <- FindMarkers(hl.both.combined, ident.1 = "relapse", ident.2 = "diagnostic", 
+                          test.use = "MAST",
+                          min.pct = 0.25, logfc.threshold = 0.25)
+#write.table(relapse.de, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/all.relapse.de.MAST.txt", sep = "\t", quote = FALSE)
+
+```
+
+
+## Visualizing differential expression
+
+```{r}
+# violin plot split by dataset (primary vs. relapse) per gene showing expression across clusters ("celltype")
+hl.both.combined[["celltype"]] <- Idents(hl.both.combined)
+
+# B and T cells
+plots <- VlnPlot(hl.both.combined, features = c("CD3D", "MS4A1"), 
+                 split.by = "case.type", group.by = "celltype", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+
+# CTLA4 and LAG3
+plots <- VlnPlot(hl.both.combined, features = c("CTLA4", "LAG3"), 
+                 split.by = "case.type", group.by = "celltype", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+
+plots <- VlnPlot(hl.both.combined, features = markers.to.plot, split.by = "case.type",  group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 1)
 
 ```
 
