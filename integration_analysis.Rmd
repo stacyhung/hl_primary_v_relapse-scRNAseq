@@ -201,58 +201,7 @@ hl_diag.merged$batch <- plyr::mapvalues(
 saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
 ```
 
-## ###############################################
-## No batch correction
-## ###############################################
-
-```{r}
-# Pre-batch-correction steps: filtering, normalization, finding variable genes
-hl_relapse.merged <- NormalizeData(hl_relapse.merged)
-hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged, selection.method = "vst", nfeatures = 2000)
-
-# Run standard workflow of visualization and clustering
-hl_relapse.merged <- ScaleData(hl_relapse.merged)
-hl_relapse.merged <- RunPCA(hl_relapse.merged, npcs = 30)
-
-# UMAP and clustering
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "pca", dims = 1:20)
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "pca", dims = 1:20)
-hl_relapse.merged <- FindClusters(hl_relapse.merged, resolution = 0.5)
-
-# Visualization
-p.no_batch_correction.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-p.no_batch_correction.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
-p.no_batch_correction.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
-```
-
-## And same thing for diagostic dataset
-
-```{r}
-hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
-
-# Pre-batch-correction steps: filtering, normalization, finding variable genes
-hl_diag.merged <- NormalizeData(hl_diag.merged)
-hl_diag.merged <- FindVariableFeatures(hl_diag.merged, selection.method = "vst", nfeatures = 2000)
-
-# Run standard workflow of visualization and clustering
-hl_diag.merged <- ScaleData(hl_diag.merged)
-hl_diag.merged <- RunPCA(hl_diag.merged, npcs = 30)
-
-# UMAP and clustering
-hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "pca", dims = 1:20)
-hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "pca", dims = 1:20)
-hl_diag.merged <- FindClusters(hl_diag.merged, resolution = 0.5)
-
-# Visualization
-p.no_batch_correction.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
-#p.no_batch_correction.celltype <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "celltype")
-p.no_batch_correction.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
-
-```
-
-## ###############################################
-## Batch correction method 1: Seurat 3
-## ###############################################
+## Batch correction using Seurat 3
 
 ```{r}
 # Using anchor method, integrate datasets by BATCH ("Chip" column) for HL relapse cases
@@ -398,6 +347,8 @@ hl.both.combined <- RunPCA(hl.both.combined, npcs = 30)
 hl.both.combined <- RunUMAP(hl.both.combined, reduction = "pca", dims = 1:20)
 hl.both.combined <- FindNeighbors(hl.both.combined, reduction = "pca", dims = 1:20)
 hl.both.combined <- FindClusters(hl.both.combined, resolution = 0.5)
+
+saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.integrated.clustered.rds")
 
 # Visualization
 p1 <- DimPlot(hl.both.combined, reduction = "umap", group.by = "case.type") # split by cohort (diag vs. relapse)
@@ -551,6 +502,7 @@ grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 
 ```{r}
 library(ggplot2)
+library(dplyr)
 
 # Tomo's latest mappings (as of July 21, 2020)
 hl.both.combined <- RenameIdents(hl.both.combined, 
@@ -582,6 +534,8 @@ saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_pl
 
 # Now plot the new annotations
 DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
+DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "case.type")
+#DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident")
 
 # create a barplot to show the numbers of cells in each cluster / component type
 celltype.numcells <- as.data.frame(table(hl.both.combined$celltype))
@@ -594,6 +548,45 @@ p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) +
       theme(panel.spacing = unit(1, "lines")) + 
       geom_text(aes(label=numcells), hjust=-0.1, vjust=0.5, size=4, color="gray47")+
       coord_flip()
+
+# create a stacked barplot to show the proportion of each cell identity by sample
+sample.celltype_num <- as.data.frame(table(hl.both.combined$orig.ident, hl.both.combined$celltype))
+colnames(sample.celltype_num) <- c("sample_id", "cell_identity", "num_cells")
+
+# order by proportion of naive B cells
+sample.celltype_num <- sample.celltype_num %>% 
+  dplyr::group_by(sample_id) %>% dplyr::mutate(total_cells = sum(as.numeric(num_cells)))
+sample.celltype_num <- as.data.frame(sample.celltype_num %>% dplyr::mutate(proportion = as.numeric(num_cells) / total_cells))
+# get order of samples by focusing only on proportion of naive B cells
+temp <- subset(sample.celltype_num, 
+               sample.celltype_num$cell_identity == "Naïve B cells")
+temp <- temp[ order(temp$cell_identity, -temp$proportion) , ]
+# set the order in the full dataframe
+sample.celltype_num$sample_id <- factor(sample.celltype_num$sample_id, levels = temp$sample_id)
+
+p <- ggplot(sample.celltype_num, 
+            aes(x=sample_id, y=num_cells, fill=cell_identity)) +
+  geom_bar(position = "fill", stat = "identity")+
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
+  scale_fill_manual(name = "Cell Identity",
+                    values = c("Naïve B cells" = "darkslateblue",
+                               "Helper T cells" = "slategray4",
+                               "T regs" = "hotpink3", 
+                               "Mature B cells" = "royalblue1", 
+                               "Naïve T cells" = "aquamarine3",
+                               "CTL" = "olivedrab4",
+                               "CD8 memory"="firebrick3",
+                               "GCB"="darkorange",
+                               "B and T mix (progenitor?)"="grey44",
+                               "Proliferation (?)"="mediumpurple1",
+                               "NK cells"="bisque3",
+                               "pDC"="magenta3",
+                               "Macrophages"="green3",
+                               "Plasma cells"="purple")) +
+
+  xlab("") +
+  ylab("")
 
 # rename clusters to only contain letters (for DotPlot only)
 hl.both.combined  <- RenameIdents(hl.both.combined,
@@ -628,9 +621,98 @@ DotPlot(
   #scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00")
 ```
 
-## Differential expression analysis
+## Find conserved markers (to help refine cluster annotations)
+
+```{r}
+library(metap)
+library(MAST)
+library(dplyr)
+
+# change default identities to cell identities (cell types)
+Idents(hl.both.combined) <- hl.both.combined$celltype
+
+## start with one cluster to test (then do a for loop)
+naiveBcell.markers <- FindConservedMarkers(hl.both.combined, ident.1 = "Naïve B cells", grouping.var = "case.type")
+
+# iterate through all the cell identities
+cell.identities <- as.vector(unique(Idents(hl.both.combined)))
+# store the results in a vector of data frames
+# initialize empty vector of results
+markers.results <- vector('list', length(cell.identities))
+
+# Approach 1: find markers that are conserved between two groups (cell identity vs. all other identities)
+for (i in 1:length(cell.identities)) {
+  markers.results[[i]] <- FindConservedMarkers(hl.both.combined, 
+                                               ident.1 = cell.identities[i],  
+                                               grouping.var = "case.type")
+}
+# Top 3 *conserved* markers for each cluster / cell type / cell identity:
+#1. Naive T cells - IL7R
+#2. Helper T cells - CXCL13
+#3. GCB - MS4A1
+#4. T regs - IL32 (LAG3, CD7 is also in the list)
+#5. Naive B cells - IGHM, IGHD, CD79A
+#6. CTL - CCL5, GZMK, GZMA, CCL4
+#7. B and T mix (progenitor?) - only 1 conserved marker: KLRB1
+#8. Mature B cells - TNFRSF13B
+#9. CD8 memory - CD8B, CD8A, CCR7
+#10. pDC - GZMB, PTGDS, CST3
+#11. Proliferation (?) - HMGB2, STMN1, MKI67
+#12. NK cells - GNLY, NKG7, KLRD1
+#13. Macrophages - CST3, LYZ, APOE
+#14. Plasma cells - IGHG1, IGHG3, IGHG2, IGHG4, IGHGP
+
+# Plot top conserved marker using FeaturePlots
+top.conserved.markers <- c("IL7R", "CXCL13", "MS4A1", "IL32", "IGHM", "CCL5", "KLRB1", "TNFRSF13B", "CD8B", "GZMB", "HMGB2", "GNLY", "CST3", "IGHG1")
+FeaturePlot(hl.both.combined, features = top.conserved.markers, min.cutoff = "q9")
+
+# Approach 2: use FindAllMarkers (finds markers that are differentially expressed in each identity group compared to all others)
+markers.results2 <- FindAllMarkers(hl.both.combined, assay = "RNA", test.use = "MAST")
+# filter for adjusted p-value < 0.05
+markers.results2 <- filter(markers.results2, markers.results2$p_val_adj < 0.05)
+
+# get top 3 markers for each cluster
+markers.results2.top3 <- do.call(rbind, 
+                lapply(split(markers.results2, markers.results2$cluster), function(x) x[order(-x$avg_logFC)[1:3],]))
+markers.results2.top1 <- do.call(rbind, 
+                lapply(split(markers.results2, markers.results2$cluster), function(x) x[order(-x$avg_logFC)[1],]))
+
+# Top markers for each cluster (based on differential expression to all other clusters)
+top.conserved.markers <- c("IGHM", "CXCL13", "IL32", "TNFRSF13B", "IL7R", "CCL5", "CD8B", "BCL11A", "TNFRSF4", "STMN1", "GNLY", "GZMB", "LYZ", "IGHG1")
+FeaturePlot(hl.both.combined, features = top.conserved.markers, min.cutoff = "q9")
+
+# plot in groups
+# Group 1: T cells
+t.markers <- c("IL7R", "CXCL13", "IL32", "CCL5", "CD8B")
+FeaturePlot(hl.both.combined, features = t.markers, min.cutoff = "q9")
+
+# Group 2: B cells
+b.markers <- c("MS4A1", "BCL11A", "IGHM", "TNFRSF13B")
+FeaturePlot(hl.both.combined, features = b.markers, min.cutoff = "q9")
+
+# Group 3: all other cells
+other.markers <- c("KLRB1", "TNFRSF4", "GZMB", 
+                   "HMGB2", "STMN1", "GNLY", 
+                   "CST3", "LYZ", "IGHG1"
+                   )
+FeaturePlot(hl.both.combined, features = other.markers, min.cutoff = "q9")
+
+# Visualize conserved cell type markers:
+conserved.markers <- c(t.markers, b.markers, other.markers)
+DotPlot(
+    object = hl.both.combined,
+    features = conserved.markers, 
+    dot.scale = 8,
+    split.by = "case.type", cols = c("red", "blue")) + 
+  RotatedAxis() + xlab("") + ylab("")
+
+```
+
+## Differential expression analysis - testing
 
 Check out https://nbisweden.github.io/excelerate-scRNAseq/session-de/session-de-methods.html for a review of DE methods that can be applied to scRNAseq data (not just those integrated in Seurat)
+
+!!!Important!!! Use the uncorrected raw (but normalized) expression data to perform DE
 
 ```{r}
 library(ggplot2)
@@ -651,7 +733,7 @@ de.methods <- c("wilcox", # NA's for p-values --> generic method
                 "roc", # 0 or 1 are good; 0.5 is bad classifer
                 "t", # 9 / 54 genes have p-value > 0 (and < 0.05)
                 "LR", #  9 / 54 genes have p-value > 0 (and < 0.05)
-                "MAST", #  2 / 54 genes have p-value > 0 (and < 0.05) --> **the only scRNAseq-specific method
+                "MAST", #  2 / 54 genes have p-value > 0 (and < 0.05) --> **only scRNAseq method
                 "DESeq2", # doesn't work --> designed for bulk RNAseq
                 "negbinom", # doesn't work --> generic method
                 "poisson" # doesn't work --> generic method
@@ -666,11 +748,70 @@ for (i in 1:length(de.methods)) {
                           test.use = de.methods[i],
                           min.pct = 0.25, logfc.threshold = 0.25)
 }
+```
 
-de.diag_vs_rel <- FindMarkers(hl.both.combined, ident.1 = "relapse", ident.2 = "diagnostic", 
-                          test.use = "MAST",
-                          min.pct = 0.25, logfc.threshold = 0.25)
-#write.table(relapse.de, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/all.relapse.de.MAST.txt", sep = "\t", quote = FALSE)
+```{r}
+# Add labels to distinguish between early and late relapse cases
+hl.combined.metadata <- read.table("~/Documents/sc_HL_relapse/data/library_info-primary_and_relapse_cohorts.txt", sep = "\t", header = TRUE)
+
+# map clinical information to orig.idents (*remember to map using vectors!)
+
+# pathology
+hl.both.combined$path <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Pathology)
+)
+# EBV status
+hl.both.combined$ebv <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$EBVStatus)
+)
+# gender
+hl.both.combined$sex <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Sex)
+)
+# age
+hl.both.combined$age <- plyr::mapvalues(x = hl.both.combined$orig.ident,
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Age)
+)
+# Stage
+hl.both.combined$stage <- plyr::mapvalues(x = hl.both.combined$orig.ident,
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Stage)
+)
+# early relapse status
+hl.both.combined$earlyRelapse <- plyr::mapvalues(x = hl.both.combined$orig.ident,
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$EarlyRelapse)
+)
+# refractory status
+hl.both.combined$refractory <- plyr::mapvalues(x = hl.both.combined$orig.ident,
+    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Refractory)
+)
+```
+
+## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be analyzed
+
+```{r}
+# diagnostic vs. relapse (early + late)
+de.diag_vs_rel <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "relapse", 
+                              ident.2 = "diagnostic", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
+
+# diagnostic vs. early relapse
+Idents(hl.both.combined) <- hl.both.combined$earlyRelapse # make case type the main identity (for DE
+de.diag_vs_rel <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "earlyRelapse", 
+                              ident.2 = "diagnostic", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_early_relapse.MAST.txt", sep = "\t", quote = FALSE)
+
+# diagnostic vs. late relapse
+# diagnostic vs. refractory
+# early relapse vs. late relapse
+# refractory vs. relapse (early + late)
 
 ```
 
@@ -703,157 +844,8 @@ wrap_plots(plots = plots, ncol = 1)
 
 
 
-## ###############################################
-## Batch correction method 2: MNN Correct
-## ###############################################
-
-```{r}
-library(batchelor)
-
-# 1. Perform pre-batch-correction steps: filtering
-#   and for each batch: normalization, (scaling?) and finding highly variable genes (HVG)
-hl_relapse.merged[["percent.mt"]] <- PercentageFeatureSet(hl_relapse.merged, pattern = "^MT-")
-hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
-
-# split relapse cases by batch
-hl_relapse.split <- SplitObject(hl_relapse.merged, split.by = "batch") # returns a list of Seurat objects
-
-hl_relapse.split <- lapply(X = hl_relapse.split, FUN = function(x) {
-  x <- NormalizeData(x)
-  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
-})
-
-hl_relapse.sce <- vector('list', length(hl_relapse.split))
-  
-# Convert Seurat objects into SingleCellExperiment objects
-for (i in 1:length(hl_relapse.split)) {
- hl_relapse.sce[[i]] <- as.SingleCellExperiment(hl_relapse.split[[i]]) 
-}
-
-# 2. Then, using MNN Correct, using the HVG as input into MNN, batch-correct the data
-hl_relapse.mnn_correct <- mnnCorrect(hl_relapse.sce[[1]],
-                                     hl_relapse.sce[[2]],
-                                     hl_relapse.sce[[3]],
-                                     hl_relapse.sce[[4]],
-                                     hl_relapse.sce[[5]])
-
-# 3. Perform PCA and visualization
-
-# Run standard workflow of visualization and clustering
-hl_relapse.merged <- ScaleData(hl_relapse.merged)
-hl_relapse.merged <- RunPCA(hl_relapse.merged, npcs = 30)
-
-# UMAP and clustering
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "pca", dims = 1:20)
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "pca", dims = 1:20)
-hl_relapse.merged <- FindClusters(hl_relapse.merged, resolution = 0.5)
-
-# Visualization
-p.MNN.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-p.MNN.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
 
 
-```
-
-## ###############################################
-## Batch correction method 3: FastMNN
-## ###############################################
-
-```{r}
-hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
-hl_relapse.merged <- NormalizeData(hl_relapse.merged)
-hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged)
-hl_relapse.merged <- RunFastMNN(object.list = SplitObject(hl_relapse.merged, split.by = "batch"))
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "mnn", dims = 1:30)
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "mnn", dims = 1:30)
-hl_relapse.merged <- FindClusters(hl_relapse.merged)
-saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
-#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
-
-#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
-p.fastMNN.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-p.fastMNN.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
-p.fastMNN.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
-```
-
-## And same thing for diagnostic
-
-```{r}
-hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
-
-hl_diag.merged <- NormalizeData(hl_diag.merged)
-hl_diag.merged <- FindVariableFeatures(hl_diag.merged)
-hl_diag.merged <- RunFastMNN(object.list = SplitObject(hl_diag.merged, split.by = "batch"))
-hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "mnn", dims = 1:30)
-hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "mnn", dims = 1:30)
-hl_diag.merged <- FindClusters(hl_diag.merged)
-#saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
-#hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-fastMNN.rds")
-
-#DimPlot(hl_diag.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
-p.fastMNN.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
-p.fastMNN.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
-#p.fastMNN.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
-
-```
-
-## ###############################################
-## Batch correction method 4: Harmony
-## ###############################################
-
-```{r}
-hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
-hl_relapse.merged <- NormalizeData(hl_relapse.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
-hl_relapse.merged <- RunHarmony(hl_relapse.merged, group.by.vars = "batch")
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "harmony", dims = 1:30)
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
-saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
-#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
-
-#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
-p.harmony.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-p.harmony.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
-p.harmony.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
-
-```
-
-```{r}
-hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
-
-hl_diag.merged <- NormalizeData(hl_diag.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
-hl_diag.merged <- RunHarmony(hl_diag.merged, group.by.vars = "batch")
-hl_diag.merged <- RunUMAP(hl_diag.merged, reduction = "harmony", dims = 1:30)
-hl_diag.merged <- FindNeighbors(hl_diag.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
-#saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_25-merged-harmony.rds")
-#hl_diag.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
-
-#DimPlot(hl_diag.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
-p.harmony.batch <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "batch")
-p.harmony.cluster <- DimPlot(hl_diag.merged, reduction = "umap", label = TRUE)
-#p.harmony.celltype <- DimPlot(hl_diag.merged, reduction = "umap", group.by = "celltype")
-```
-
-## ###############################################
-## Batch correction method 5: LIGER
-## ###############################################
-
-```{r}
-# will have to try another day - having trouble installing the package
-
-hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
-hl_relapse.merged <- NormalizeData(hl_relapse.merged) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()
-hl_relapse.merged <- RunHarmony(hl_relapse.merged, group.by.vars = "batch")
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, reduction = "harmony", dims = 1:30)
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, reduction = "harmony", dims = 1:30) %>% FindClusters()
-saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
-#hl_relapse.merged <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-harmony.rds")
-
-#DimPlot(hl_relapse.merged, group.by = c("batch", "ident", "celltype"), ncol = 3)
-p.harmony.batch <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-p.harmony.cluster <- DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE)
-p.harmony.celltype <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "celltype")
-
-```
 
 
 
@@ -907,182 +899,6 @@ VlnPlot(hl_diag.merged,
 
 ```
 
-## (2) Normalize, scale and find variable features
-
-SCTransform now replaces all of:
-
-* Application of global-scaling normalization method `LogNormalize`
-  - Normalizes feature expression measurements for each cell by total expression
-  - Multiplies this by a scale factor (10,000 by default) and log-transforms the result
-
-* Application of the linear transformation `ScaleData` function:
-  - Shifts the expression of each gene, so that mean expression across cell is 0
-  - Scales the expression of each gene, so that variances across cells is 1
-    - This step gives equal weight in downstream analysis, so highly expressed genes do not dominate
-  - Result is stored in SeuratObject[["RNA"]]@scale.data
-
-* Application of `FindVariableFeatures`, to identify features with high cell-to-cell variation
-  - E.g. highly expressed in some cells, lowly expressed in others
-  - Focusing on these genes in downstream analysis (e.g. PCA) helps to highlight biological signal
-  - Implemented with , which returns 2000 features by default
-
-************************************************************************************************************
-*NB: The sctransform normalization reveals sharper biological distinctions compared to the standard worklow, specifically:
-  - Clear separation of at least 3 CD8 T cell populations (naive, memory, effector), based on CD8A, GZMK, CCL5, GZMK expression
-  - Clear separation of three CD4 T cell populations (naive, memory, IFN-activated) based on S100A4, CCR7, IL32, and ISG15
-  - Additional developmental sub-structure in B cell cluster, based on TCL1A, FCER2
-  - Additional separation of NK cells into CD56dim vs. bright clusters, based on XCL1 and FCGR3A
-
-************************************************************************************************************
-
-```{r}
-# previous workflow:
-
-#hl_relapse.merged <- NormalizeData(hl_relapse.merged, normalization.method = "LogNormalize", scale.factor = 10000)
-#hl_relapse.merged <- FindVariableFeatures(hl_relapse.merged, selection.method = "vst", nfeatures = 2000)
-#hl_relapse.merged <- ScaleData(hl_relapse.merged, vars.to.regress = c("batch", "chip", "percent.mt"), verbose = FALSE)
-
-# plot the 30 most highly variable genes
-top30 <- head(VariableFeatures(hl_relapse.merged), 30)
-plot1 <- VariableFeaturePlot(hl_relapse.merged)
-plot2 <- LabelPoints(plot = plot1, points = top30, repel = TRUE)
-
-# Very memory-intensive (***make sure you remove all unused R objects using the rm command)
-hl_relapse.merged <- SCTransform(hl_relapse.merged, 
-                                 vars.to.regress = c("batch", "chip", "percent.mt"), 
-                                 verbose = TRUE,
-                                 conserve.memory = TRUE)
-```
-
-## Output from SCTransform (applied gc(full=TRUE) and rm() for all other objects to maximum memory available)
-
-```{r}
-#Calculating cell attributes for input UMI matrix
-#Variance stabilizing transformation of count matrix of size 20313 by 76607
-#Model formula is y ~ log_umi
-#Get Negative Binomial regression parameters per gene
-#Using 2000 genes, 76607 cells  |======================================================================================================| 100%
-#...iteration limit reached...
-
-#Found 6 outliers - those will be ignored in fitting/regularization step
-#
-#Skip calculation of full residual matrix
-#Will not return corrected UMI because residual type is not set to 'pearson'Calculating gene attributes
-#Wall clock passed: Time difference of 19.82973 mins
-#Calculating variance for residuals of type pearson for 20313 genes
-#  |======================================================================================================| 100%
-
-#Determine variable features
-#Set 3000 variable features
-#Return only variable features for scale.data slot of the output assay
-#Calculating residuals of type pearson for 3000 genes
-#  |======================================================================================================| 100%
-
-#Computing corrected UMI count matrix
-#  |======================================================================================================| 100%
-
-#Place corrected count matrix in counts slot
-#Regressing out batch, chip, percent.mt
-#  |======================================================================================================| 100%
-
-#Centering data matrix
-#  |======================================================================================================| 100%
-
-#Set default assay to SCT
-```
-
-## Perform linear dimensional reduction
-
-```{r}
-# Perform PCA on the scaled data
-hl_relapse.merged <- RunPCA(hl_relapse.merged)
-#hl_relapse.merged <- RunPCA(hl_relapse.merged, features = VariableFeatures(object = hl_relapse.merged))
-
-# Examine PCA results
-print(hl_relapse.merged[["pca"]], dims = 1:5, nfeatures = 30)
-
-# Visualize loadings
-VizDimLoadings(hl_relapse.merged, dims = 1:2, reduction = "pca")
-DimPlot(hl_relapse.merged, reduction = "pca")
-DimHeatmap(hl_relapse.merged, dims=1:2, cells = 500, balanced = TRUE)
-DimHeatmap(hl_relapse.merged, dims=1:15, cells = 500, balanced = TRUE)
-```
-
-## Output of RunPCA
-
-```{r}
-#PC_ 1 
-#Positive:  IL32, CXCL13, TRBC1, SRGN, CD3D, TRAC, CCL5, CD7, CD2, FYB1 
-#	   NKG7, KLRB1, GZMK, TRBC2, NEAT1, GIMAP7, IL7R, CYTOR, GIMAP4, CD3E 
-#	   LAG3, MAF, CD3G, LAT, S100A4, SYNE2, SPOCK2, GZMA, TSHZ2, TNFRSF4 
-#Negative:  IGKC, HLA-DRA, IGLC2, CD74, IGHM, HLA-DRB1, IGLC3, HLA-DPB1, HLA-DPA1, MS4A1 
-#	   HLA-DQA1, HLA-DQB1, CD79A, TCL1A, CD79B, IGHD, BANK1, MEF2C, HLA-DMA, HLA-DMB 
-#	   CD22, CD37, BCL11A, VPREB3, FCER2, CD72, CD83, RALGPS2, HLA-DRB5, POU2F2 
-#PC_ 2 
-#Positive:  CXCL13, TRBC1, TSHZ2, TRAC, THADA, FYB1, MAF, TNFRSF4, IL6ST, CD3D 
-#	   PTPN13, FKBP5, SPOCK2, TRBC2, PASK, LAT, CTLA4, CD4, ITM2A, ICOS 
-#	   LGMN, IL6R, CORO1B, MIR4435-2HG, TCF7, LIMS1, TOX2, CD40LG, AC004585.1, IL32 
-#Negative:  NKG7, CCL5, GNLY, GZMA, GZMK, KLRD1, GZMB, PRF1, GZMH, CCL4 
-#	   KLRC1, TYROBP, CTSW, TRDC, FCER1G, CST7, XCL2, KLRF1, XCL1, CMC1 
-#	   FCGR3A, CD8A, CCL3, HOPX, PTGDR, EOMES, FGFBP2, CD160, CCL4L2, KLRC2 
-#PC_ 3 
-#Positive:  IGKC, CXCL13, IGKV3-20, IGKV3-11, IGKV4-1, IGHG1, IGHG2, HLA-DRB1, IGKV3-15, IGKV1-5 
-#	   IGLC5, SRGN, HLA-DQA1, JCHAIN, IGKV1-39, HSP90B1, MZB1, XBP1, CD83, HLA-DQB1 
-#	   LAG3, HLA-DRA, CD74, IGHG4, PARP14, HLA-DPA1, CCL3, ISG15, IGHG3, TYMP 
-#Negative:  IGLC2, IGLC3, IGLC7, IGLC6, IGLV6-57, IGLV2-14, IGLV1-44, IGLV1-40, JUN, IFT57 
-#	   IGLV3-19, IGLV4-69, IGLV3-25, IGLV3-21, IGLV2-23, IGLV1-47, IL7R, IGLV2-8, KLF2, TXNIP 
-#	   TPT1, RPS12, IGLV1-51, RPS27, IGLV2-11, LINC01781, RPL34, IGHV4-39, EEF1A1, AC245014.3 
-#PC_ 4 
-#Positive:  IL7R, RPS12, TPT1, VIM, RPS6, RPS18, RPL10, RPL21, RPL34, GIMAP7 
-#	   EEF1A1, CCR7, ANXA1, RPLP2, RPS27, LDHB, RPL39, RPS4X, NOSIP, RPS29 
-#	   TXNIP, ZFP36L2, RPL31, RPL13A, EEF1B2, GIMAP1, RPL41, TCF7, LEF1, RPL27A 
-#Negative:  CXCL13, SRGN, IGKC, IGLC2, LAG3, HLA-DRA, IL32, HLA-DRB1, CD74, CTLA4 
-#	   CYTOR, TNFRSF4, MAF, TNIP3, LGMN, IGHM, MIR4435-2HG, IGLC3, TNFRSF18, RGS1 
-#	   NEAT1, LINC01943, HLA-DPA1, DUSP2, HLA-DQA1, CD7, MS4A1, PTMS, HLA-DQB1, HLA-DPB1 
-#PC_ 5 
-#Positive:  IGLC2, IGKC, JUN, FOS, JUNB, DUSP1, IL7R, FOSB, IER2, TSC22D3 
-#	   KLF2, EGR1, TUBA1A, DNAJB1, CD69, ZFP36L2, KLF6, VIM, H3F3B, RPS12 
-#	   TPT1, HSPA1B, ZFP36, ANXA1, TCF7, RHOB, GIMAP7, BTG2, RPS18, SLC2A3 
-#Negative:  IGLC3, IGLC7, IGLC6, CD74, IGHM, LAG3, SRGN, CXCL13, HLA-DRA, IGLV1-47 
-#	   JCHAIN, MAF, HLA-DQA2, MZB1, HLA-DRB5, MEF2C, IL4R, TNFRSF4, LGMN, IGLV1-44 
-#	   CTLA4, HLA-DMB, TNIP3, TNFRSF18, CST3, CD79B, MIR4435-2HG, FCRL5, CYTOR, IGHD
-```
-
-## Determine the "dimensionality" of the dataset
-
-```{r}
-# doesn't work
-#JackStrawPlot(hl_relapse.merged)
-
-# Looks like the first 20 PCs are important
-ElbowPlot(hl_relapse.merged)
-```
-
-## Cluster the cells
-
-```{r}
-hl_relapse.merged <- FindNeighbors(hl_relapse.merged, dims = 1:20)
-hl_relapse.merged <- FindClusters(hl_relapse.merged, resolution = 0.8)
-
-# look at the cluster IDs of the first 5 cells
-head(Idents(hl_relapse.merged), 5)
-```
-
-## Run non-linear dimensional reduction (UMAP)
-
-```{r}
-hl_relapse.merged <- RunUMAP(hl_relapse.merged, dims = 1:20)
-
-# Visualize UMAP
-DimPlot(hl_relapse.merged, label = TRUE) + NoLegend()
-
-# Save object so that it can be loaded without having to re-run computationally intensive steps again
-#saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-sctransform_workflow.rds") # 2.8 Gb
-
-# read back in if necessary
-hl_relapse.merged.sct <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged-sctransform_workflow.rds")
-```
-
 ## Find differentially expressed features (cluster biomarkers)
 
 ```{r}
@@ -1096,277 +912,6 @@ write.table(top10, "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merge
 
 #top10 <- hl_relapse.merged %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
 DoHeatmap(hl_relapse.merged, features = top10$gene) + NoLegend()
-```
-
-## Show UMAP visualization based on cluster, chip, and batch (to show normalization has occurred)
-
-```{r}
-library(cowplot)
-
-# show umap coloured by chip
-p1 <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "chip")
-# show umap coloured by batch
-p2 <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "batch")
-# show umap coloured by sample
-p3 <- DimPlot(hl_relapse.merged, reduction = "umap", group.by = "orig.ident", pt.size = 0.001)
-
-# show plots side by side
-plot_grid(p1, p2)
-```
-
-## Annotate clusters based on canonical markers
-
-```{r}
-# Seurat's sctransform function allows:
-#  1. Clear separation of naive, memory and effector CD8 T-cell populations based on CD8A, GZMK, and CCL5 expression
-#  2. Clear separation of naive, memory, and IFN-activated CD4 T-cell populations based on S100A4, CCR7, IL32 and ISG15
-#  3. Developmental sub-structure in B-cell cluster based on TCL1A and FCER2
-#  4. Separation of NK cells into CD56dim vs. bright clusters, based on XCL1 and FCGR3A
-
-# Visualize canonical marker genes as violin plots
-VlnPlot(hl_relapse.merged, features = c("CD8A", "GZMK", "CCL5", 
-                                        "S100A4", "CCR7", "ISG15", "CD3D"), 
-    pt.size = 0.2, ncol = 4)
-
-# Visualize canonical marker genes on the sctransform embedding.
-FeaturePlot(hl_relapse.merged, features = c("CD8A", "GZMK", "CCL5"), pt.size = 0.2, 
-    ncol = 3)
-FeaturePlot(hl_relapse.merged, features = c("S100A4", "CCR7", "IL32", "ISG15"), pt.size = 0.2, 
-    ncol = 2)
-
-```
-
-## Feature / violin plots for biomarkers of each cell component
-
-```{r}
-# B cells: CD19, MS4A1, IGHD
-FeaturePlot(hl_relapse.merged, features = c("CD19", "MS4A1", "IGHD"), ncol=3) # left hemisphere
-
-# T cells: CD3D, CD8B, CD4
-FeaturePlot(hl_relapse.merged, features = c("CD3D", "CD8B", "CD4"), ncol=3) # right hemisphere
-
-# Plasma cell: SDC1
-FeaturePlot(hl_relapse.merged, features = c("SDC1")) # clusters 24 + 25
-
-# NK cell: NCAM1
-FeaturePlot(hl_relapse.merged, features = c("NCAM1")) # cluster 20
-
-# Plasmacytoid DC: CLEC4C, NRP1
-FeaturePlot(hl_relapse.merged, features = c("CLEC4C", "NRP1")) # scattered
-
-# Macrophage: CD68, IL3RA, IDO1
-FeaturePlot(hl_relapse.merged, features = c("CD68", "IL3RA", "IDO1")) # scattered
-
-# Progenitor: CD34
-FeaturePlot(hl_relapse.merged, features = c("CD34")) # scattered
-
-# Naive T-cell: CCR7, IL7R, LEF1, SELL
-FeaturePlot(hl_relapse.merged, features = c("CCR7", "IL7R", "LEF1", "SELL")) # scattered
-
-# Memory T-cell: CD44
-FeaturePlot(hl_relapse.merged, features = c("CD44"))
-
-# Transcription factor
-FeaturePlot(hl_relapse.merged, features = c("EOMES", "ID2")) # mostly T-cells?
-
-# Inhibitory receptor: TIGIT, HAVCR2, CTLA4, LAG3, CD274, PDCD1
-FeaturePlot(hl_relapse.merged, features = c("TIGIT", "HAVCR2", "CTLA4", "LAG3", "CD274", "PDCD1")) # scattered
-
-# Effector molecule: GZMA, GZMK 
-FeaturePlot(hl_relapse.merged, features = c("GZMA", "GZMK"))  # clusters 10 + 20
-
-# Co-stimulatory molecule: ICOS, ICOSLG, CD28, TNFRSF18, TNFRSF8, CD40LG
-FeaturePlot(hl_relapse.merged, features = c("ICOS", "ICOSLG", "CD28", "TNFRSF18", "TNFRSF8", "CD40LG")) # scattered
-
-# T helper: CXCR5, BCL6, KLRB1, CCR4, TBX21, GATA3
-FeaturePlot(hl_relapse.merged, features = c("CXCR5", "BCL6", "KLRB1", "CCR4", "TBX21", "GATA3")) # scattered
-
-# Cytokine / chemokine: IL2, IL4, IFNG
-FeaturePlot(hl_relapse.merged, features = c("IL2", "IL4", "IFNG"))
-
-# LAG3 + Tregs (FOXP3, IL2RA, IKZF2)
-FeaturePlot(hl_relapse.merged, features = c("FOXP3", "IL2RA", "IKZF2", "CTLA4", "LAG3")) # clusters 5, 12
-
-# Violin plots
-markers.to.plot <- c("SDC1", "NCAM1", "GZMA", "GZMK", "CTLA4", "LAG3")
-plots <- VlnPlot(hl_relapse.merged, features = markers.to.plot, ncol = 2, pt.size = 0.01)
-markers.to.plot <- c("MS4A1", "CD3D")
-plots <- VlnPlot(hl_relapse.merged, features = markers.to.plot, ncol = 1, pt.size = 0.01)
-CombinePlots(plots = plots, ncol = 1)
-
-```
-
-```{r}
-# display expression dot plot to show conservation of biomarkers by cluster between primary and relapse cases
-markers.to.plot <- c("CD3D", "CD8B", "CD4", "CD19", "MS4A1", "IGHD", "SDC1", "NCAM1", "CLEC4C", "NRP1", "CD68", "IL3RA", "IDO1", "CD34", "CCR7", "IL7R", "LEF1", "SELL", "CD44", "EOMES", "ID2", "TIGIT", "HAVCR2", "CTLA4", "LAG3", "CD274", "PDCD1", "GZMA", "GZMK", "ICOS", "ICOSLG", "CD28", "TNFRSF18", "TNFRSF8", "CD40LG", "FOXP3", "IL2RA", "IKZF2", "CXCR5", "BCL6", "KLRB1", "CCR4", "TBX21", "GATA3", "IL2", "IL4", "IFNG")
-
-DotPlot(hl_relapse.merged, 
-        features = rev(markers.to.plot), 
-        cols = c("blue", "red"), 
-        dot.scale = 8) + 
-  RotatedAxis()
-
-# plot expression by average expression of each gene
-cluster.averages <- AverageExpression(hl_relapse.merged, return.seurat = TRUE)
-DoHeatmap(cluster.averages, 
-          features = unlist(markers.to.plot),
-          size = 3, 
-          draw.lines = FALSE)
-
-#component.mappings <- readxl::read_excel("/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/data/component_genes_with_functions.xlsx", col_names = TRUE)
-
-```
-
-## Extract gene expression matrix to customize heatmap 
-
-```{r}
-library(pheatmap)
-library(dplyr)
-
-hl_R.sct.scaled <- hl_relapse.merged@assays$SCT@scale.data
-# this is a 3000 (features) X 76607 (barcodes) matrix
-hl_R.cluster.avgs <- GetAssayData(object = cluster.averages, slot = "scale.data")
-# a 20313 (features) X 27 (clusters) matrix
-write.table(hl_R.cluster.avgs, "~/Documents/sc_HL_relapse/seurat/output/hl_R.cluster.avgs.expr.txt", sep = "\t")
-# read back in if needed
-
-# extract markers of interest
-markers.to.plot <- c("CD3D", "CD8B", "CD4", 
-                     "CD19", "MS4A1", "IGHD", 
-                     "SDC1", 
-                     "NCAM1", 
-                     "CLEC4C", "NRP1", 
-                     "CD68", "IL3RA", "IDO1", 
-                     "CD34", 
-                     "CCR7", "IL7R", "LEF1", "SELL", 
-                     "CD44", 
-                     "EOMES", "ID2", 
-                     "TIGIT", "HAVCR2", "CTLA4", "LAG3", "CD274", "PDCD1", 
-                     "GZMA", "GZMK", 
-                     "ICOS", "ICOSLG", "CD28", "TNFRSF18", "TNFRSF8", "CD40LG", 
-                     "FOXP3", "IL2RA", "IKZF2", 
-                     "CXCR5", "BCL6", "KLRB1", "CCR4", "TBX21", "GATA3", 
-                     "IL2", "IL4", "IFNG")
-
-hl_R.components.cluster.avgs <- hl_R.cluster.avgs[ rownames(hl_R.cluster.avgs) %in% markers.to.plot , ]
-
-# create heatmap split by component
-component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
-rownames(component.mappings) <- component.mappings$Gene
-components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
-component.mappings$Gene <- NULL
-component.mappings$Alt_name <- NULL
-
-# reorder expression matrix to match component mappings
-hl_R.components.cluster.avgs.ordered <- hl_R.components.cluster.avgs[ row.names(components.ordered), ]
-
-pheatmap(hl_R.components.cluster.avgs.ordered, 
-         annotation_row = component.mappings, 
-         cluster_rows = FALSE, 
-         annotation_names_row = FALSE, 
-         angle_col = 45, 
-         gaps_row = c(3,9,12,14,20,23,24,28,29,30,32,33,36,42,44), border_color = NA)
-
-```
-
-## Produce single-cell level heatmaps of expression for EACH cluster
-
-```{r}
-library(gridExtra)
-
-NUM_CLUSTERS = 27
-
-# retrieve expression for each cell across the component genes of interest
-hl_R.sct.markers <- hl_R.sct.scaled[ rownames(hl_R.sct.scaled) %in% markers.to.plot , ]
-
-# create heatmap split by component
-component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
-# remove genes that are not in the the 3000 top variable genes
-genes.not_var <- c("CD274", "CD44", "ICOSLG")
-component.mappings <- filter(component.mappings, !(component.mappings$Gene %in% genes.not_var))
-# order by component then gene name so that the heatmap legend makes sense
-rownames(component.mappings) <- component.mappings$Gene
-components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
-components.ordered$Gene <- NULL
-components.ordered$Alt_name <- NULL
-
-# reorder expression matrix to match component mappings
-hl_R.sct.markers.ordered <- hl_R.sct.markers[ row.names(components.ordered), ]
-
-# to create separate expr matrices for each cluster, need mappings for cell --> cluster
-hl_relapse.clusters <- hl_relapse.merged$seurat_clusters
-# convert to char
-clusters.char <- levels(hl_relapse.clusters)[hl_relapse.clusters] # ordered vector of cluster ids (0 through 26)
-barcodes.cluster <- attributes(hl_relapse.clusters)$names # ordered vector of barcodes (76,607 unique entries)
-clusters.df <- data.frame(barcodes.cluster, clusters.char)
-
-# extract barcodes corresponding to clusters (an array of vectors?)
-# pseudocode: 
-
-# for c = 0 to 27
-#   barcodes[c] = all element keys with values of c
-#   hl_R.sct.scaled.arr[c] = hl_R.sct.scaled[ , columns are in barcodes[c] ]
-#   heatmaps[c] <- pheatmap of hl_R.sct.scaled.arr[c]
-
-barcodes <- vector('list', NUM_CLUSTERS)
-expr <- vector('list', NUM_CLUSTERS)
-heatmaps <- vector('list', NUM_CLUSTERS)
-
-for (c in 0:26) {
-  # store list of barcodes by cluster c
-  barcodes[[c+1]] <- filter(clusters.df, clusters.df$clusters.char == c)
-  expr[[c+1]] <- hl_R.sct.markers.ordered[, colnames(hl_R.sct.markers.ordered) %in% barcodes[[c+1]]$barcodes.cluster ]
-  heatmaps[[c+1]] <- pheatmap(expr[[c+1]], 
-         annotation_row = components.ordered, 
-         cluster_rows = FALSE, 
-         annotation_names_row = FALSE, 
-         angle_col = 45, 
-         gaps_row = c(3,8,11,13,18,21,25,26,27,29,30,33,39,41), 
-         border_color = NA, show_colnames = FALSE, scale = "none")
-  #print(i)
-}
-
-# plot all 27 heatmaps
-#grid.arrange(grobs = heatmaps, ncol=3)
-grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
-```
-
-## Rename clusters based on feature plots
-
-```{r}
-# Tomo's latest mappings (as of June 30, 2020)
-hl_relapse.merged.sct <- RenameIdents(hl_relapse.merged.sct, 
-                           `0` = "B cells", 
-                           `1` = "B cells", 
-                           `2` = "Helper T cells?", 
-                           `3` = "B cells",
-                           `4` = "Naïve T cells", 
-                           `5` = "B cells",
-                           `6` = "Naïve T cells",
-                           `7` = "Regulatory T cells (Tregs)",
-                           `8` = "Helper T cells",
-                           `9` = "B cells",
-                           `10` = "Cytotoxic T cells (CTL)",
-                           `11` = "B cells",
-                           `12` = "Naïve T cells",
-                           `13` = "B cells",
-                           `14` = "Naïve T cells",
-                           `15` = "B cells",
-                           `16` = "B cells",
-                           `17` = "Helper T cells (TFH?)",
-                           `18` = "Helper T cells?",
-                           `19` = "progenitor?",
-                           `20` = "NK cells",
-                           `21` = "T-regs?",
-                           `22` = "progenitor?",
-                           `23` = "Macrophage",
-                           `24` = "Plasma cell",
-                           `25` = "Plasma cell",
-                           `26` = "Plasmacytoid dendritic cells (pDC)"
-                            )
-
-# Now plot the new annotations
-DimPlot(hl_relapse.merged, reduction = "umap", label = TRUE, pt.size = 0.2) + NoLegend()
 ```
 
 ## Special request from Richard Corbett - what are the cell types for each barcode?
@@ -1411,101 +956,6 @@ clusters.annotated.RC <- clusters.annotated.RC[ , keeps]
 write.table(clusters.annotated.RC, "~/Documents/sc_HL_relapse/for_Richard/lsarp_hl_relapse-annotations-RC_samples.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 ```
 
-
-
-
-
-
-5. Identify conserved cell type markers
-
-Use the `FindConservedMarkers` function to identify canonical cell type marker genes that are conserved across conditions - this function performs differential gene expression for each dataset/group and combines p-values using meta-analysis methods from the MetaDE R package.
-
-```{r}
-#DefaultAssay(hl.combined) <- "RNA"
-cluster10.markers <- FindConservedMarkers(hl.combined, 
-                                          ident.1 = "10_primary", 
-                                          grouping.var = "case_type", 
-                                          verbose = FALSE)
-
-write.table(cluster10.markers, "/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/seurat/output/integration-primary+relapse-cluster10_markers_in_relapse.txt", sep = "\t", quote = FALSE)
-```
-
-
-
-
-```{r}
-# biomarkers that correspond to a distinct cluster
-FeaturePlot(hl.combined, features = c("SDC1", "NRP1", "GZMK"),  min.cutoff = "q9", ncol = 3)
-
-# examine expression of LAG3 and CTLA4 in primary vs. relapse cases
-FeaturePlot(hl.combined, features = c("FOXP3", "IL2RA", "IKZF2", "CTLA4", "LAG3"), min.cutoff = "q9", split.by = "case_type") # clusters 5, 12
-
-# annotate clusters that have clear biomarker expression
-hl.combined <- RenameIdents(hl.combined, 
-                            `19` = "Plasma Cells", 
-                            `18` = "Plasmacytoid DC", 
-                            `9` = "Effector Molecules")
-# renaming second round:
-hl.combined <- RenameIdents(hl.combined, 
-                            `0` = "Plasma Cells", 
-                            `1` = "Plasmacytoid DC", 
-                            `2` = "Naive T cells",
-                            `3` = "Naive T cells",
-                            `4` = "B cells",
-                            `5` = "Tregs",
-                            `6` = "B cells",
-                            `7` = "B cells",
-                            `8` = "B cells",
-                            `10` = "Naive T cells",
-                            `11` = "Naive T cells",
-                            `12` = "Tregs",
-                            `13` = "B cells",
-                            `14` = "NK cells",
-                            `15` = "CD4 T cells",
-                            `16` = "germinal centre B cells",
-                            `17` = "macrophages",
-                            `Effector Molecules` = "Cytotoxic T cells")
-
-DimPlot(hl.combined, label = TRUE, repel = TRUE)
-
-# display expression dot plot to show conservation of biomarkers by cluster between primary and relapse cases
-#Idents(hl.combined) <- factor(Idents(hl.combined), levels = c("Mono/Mk Doublets", "pDC", "Eryth", "Mk", "DC", "CD14 Mono", "CD16 Mono", "B Activated", "B", "CD8 T", "NK", "T activated", "CD4 Naive T", "CD4 Memory T"))
-markers.to.plot <- c("CD3D", "CD8B", "CD4", "CD19", "MS4A1", "IGHD", "SDC1", "NCAM1", "CLEC4C", "NRP1", "CD68", "IL3RA", "IDO1", "CD34", "CCR7", "IL7R", "LEF1", "SELL", "CD44", "EOMES", "ID2", "TIGIT", "HAVCR2", "CTLA4", "LAG3", "CD274", "PDCD1", "GZMA", "GZMK", "ICOS", "ICOSLG", "CD28", "TNFRSF18", "TNFRSF8", "CD40LG", "FOXP3", "IL2RA", "IKZF2", "CXCR5", "BCL6", "KLRB1", "CCR4", "TBX21", "GATA3", "IL2", "IL4", "IFNG")
-
-Idents(hl.combined) <- factor(Idents(hl.combined), 
-                              levels = rev(c(
-                                         "CD4 T cells_primary", "CD4 T cells_relapse",
-                                         "Cytotoxic T cells_primary", "Cytotoxic T cells_relapse",
-                                         "Naive T cells_primary", "Naive T cells_relapse",
-                                         "Tregs_primary", "Tregs_relapse", 
-                                         "B cells_primary", "B cells_relapse",
-                                         "germinal centre B cells_primary", "germinal centre B cells_relapse",
-                                         "macrophages_primary", "macrophages_relapse",
-                                         "NK cells_primary", "NK cells_relapse",
-                                         "Plasmacytoid DC_primary", "Plasmacytoid DC_relapse",
-                                         "Plasma Cells_primary", "Plasma Cells_relapse"
-                                         )))
-
-DotPlot(hl.combined, 
-        features = rev(markers.to.plot), 
-        cols = c("blue", "red"), 
-        dot.scale = 8) + 
-  RotatedAxis()
-
-# plot expression by average expression of each gene
-cluster.averages <- AverageExpression(hl.combined, return.seurat = TRUE)
-DoHeatmap(cluster.averages, features = unlist(markers.to.plot), size = 3, draw.lines = FALSE)
-
-component.mappings <- readxl::read_excel("/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/data/component_genes_with_functions.xlsx", col_names = TRUE)
-
-# extract expression to plot in pheatmap
-expr.hl_markers <- hl.combined@assays[["RNA"]]
-# this command does the same thing:
-#counts.hl_markers <- GetAssayData(object = hl.combined, slot = "counts")
-
-
-```
-
 Identify differentially expressed genes across conditions
 
 ```{r}
@@ -1547,7 +997,6 @@ plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type"
 CombinePlots(plots = plots, ncol = 1)
 
 #FeaturePlot(hl.combined, features = c("TBX21", "GATA3", "IL17A", "RORC", "LAG3", "CD4", "IRF1"), min.cutoff = "q9")
-
 
 # Now find differentially expression markers for each cluster
 cluster10.cells <- subset(hl.combined, idents = c("10_primary", "10_relapse"))
