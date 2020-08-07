@@ -606,17 +606,12 @@ hl.both.combined  <- RenameIdents(hl.both.combined,
                                   `Naïve B cells` = "naiveBCells")
 
 # Plot expression of component genes for both case types, side-by-side
-DotPlot(hl.both.combined, 
-        features = rev(markers.to.plot), 
-        cols = c("blue", "red"), dot.scale = 8, 
-        split.by = "case.type") + 
-  RotatedAxis()
 
 DotPlot(
     object = hl.both.combined,
-    features = markers.to.plot, 
+    features = rev(markers.to.plot), 
     dot.scale = 8,
-    split.by = "case.type", cols = c("red", "blue")) + 
+    split.by = "case.type", cols = c("red", "blue"), scale = TRUE) + 
   RotatedAxis()
   #scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00")
 ```
@@ -750,8 +745,10 @@ for (i in 1:length(de.methods)) {
 }
 ```
 
+## Add labels to distinguish between early and late relapse cases
+
 ```{r}
-# Add labels to distinguish between early and late relapse cases
+# read in metadata
 hl.combined.metadata <- read.table("~/Documents/sc_HL_relapse/data/library_info-primary_and_relapse_cohorts.txt", sep = "\t", header = TRUE)
 
 # map clinical information to orig.idents (*remember to map using vectors!)
@@ -786,32 +783,136 @@ hl.both.combined$refractory <- plyr::mapvalues(x = hl.both.combined$orig.ident,
 )
 ```
 
-## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be analyzed
+## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be 
+
+## For FindMarkers function, be careful of groups specified: group 1 vs. group 2 indicates for avg_logFC (log fold-chage of the average expression between the two groups), a POSITIVE value indicates the gene is MORE HIGHLY EXPRESSED in the FIRST group (i.e. group 1).
 
 ```{r}
-# diagnostic vs. relapse (early + late)
+de.results <- vector('list', 6)
+
+# 1. diagnostic vs. relapse (early + late)
+Idents(hl.both.combined) <- hl.both.combined$case.type
 de.diag_vs_rel <- FindMarkers(hl.both.combined, assay = "RNA", 
-                              ident.1 = "relapse", 
-                              ident.2 = "diagnostic", 
+                              ident.1 = "diagnostic", 
+                              ident.2 = "relapse", 
                               test.use = "MAST",
                               min.pct = 0.25, 
                               logfc.threshold = 0.25)
-write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
+de.results[[1]] <- de.diag_vs_rel
+# write results to output
+#write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
 
-# diagnostic vs. early relapse
-Idents(hl.both.combined) <- hl.both.combined$earlyRelapse # make case type the main identity (for DE
-de.diag_vs_rel <- FindMarkers(hl.both.combined, assay = "RNA", 
+# 2. diagnostic vs. early relapse
+Idents(hl.both.combined) <- hl.both.combined$earlyRelapse
+de.diag_vs_earlyrel <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "diagnostic", 
+                              ident.2 = "earlyRelapse", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+de.results[[2]] <- de.diag_vs_earlyrel
+#write.table(de.diag_vs_earlyrel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_early_relapse.MAST.txt", sep = "\t", quote = FALSE)
+
+# 3. diagnostic vs. late relapse
+de.diag_vs_laterel <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "diagnostic", 
+                              ident.2 = "lateRelapse", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+de.results[[3]] <- de.diag_vs_laterel
+#write.table(de.diag_vs_laterel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_late_relapse.MAST.txt", sep = "\t", quote = FALSE)
+
+# 4. early relapse vs. late relapse
+de.early_vs_late <- FindMarkers(hl.both.combined, assay = "RNA", 
                               ident.1 = "earlyRelapse", 
-                              ident.2 = "diagnostic", 
+                              ident.2 = "lateRelapse", 
                               test.use = "MAST",
                               min.pct = 0.25, 
                               logfc.threshold = 0.25)
-write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_early_relapse.MAST.txt", sep = "\t", quote = FALSE)
+de.results[[4]] <- de.early_vs_late
+#write.table(de.early_vs_late, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.early_vs_late_relapse.MAST.txt", sep = "\t", quote = FALSE)
 
-# diagnostic vs. late relapse
-# diagnostic vs. refractory
-# early relapse vs. late relapse
-# refractory vs. relapse (early + late)
+# 5. diagnostic vs. refractory
+Idents(hl.both.combined) <- hl.both.combined$refractory 
+de.diag_vs_refractory <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "diagnostic", 
+                              ident.2 = "relapseRefractory", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+de.results[[5]] <- de.diag_vs_refractory
+#write.table(de.diag_vs_refractory, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_refractory.MAST.txt", sep = "\t", quote = FALSE)
+
+# 6. refractory vs. relapse (early + late)
+de.refractory_vs_relapse <- FindMarkers(hl.both.combined, assay = "RNA", 
+                              ident.1 = "relapseRefractory", 
+                              ident.2 = "relapseNotRefractory", 
+                              test.use = "MAST",
+                              min.pct = 0.25, 
+                              logfc.threshold = 0.25)
+de.results[[6]] <- de.refractory_vs_relapse
+#write.table(de.refractory_vs_relapse, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.refractory_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
+```
+
+## Filter out DE results
+
+```{r}
+library(dplyr)
+
+output.files <- c("diag_vs_relapse", "diag_vs_early_relapse", "diag_vs_late_relapse", "early_vs_late_relapse", "diag_vs_refractory", "refractory_vs_relapse")
+output.folder <- "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/"
+
+# Remove "*orf*" "^RP" and "MT-" proteins
+for (i in 1:length(de.results)) {
+  file.output <- paste(output.folder, output.files[i], ".txt", sep = "")
+  de.results[[i]] <- de.results[[i]][ !(grepl("(^RP)|(MT-)|(*orf*)", rownames(de.results[[i]]))), ]
+  write.table(de.results[[i]], file.output, sep = "\t", quote = FALSE)
+}
+
+```
+
+## DE comparisons at the cluster (cell type) level
+
+```{r}
+NUM_CLUSTERS = length(unique(hl.both.combined$celltype))
+
+# define comparators
+hl.both.combined$celltype.case <- paste(hl.both.combined$celltype, hl.both.combined$case.type, sep = "_")
+Idents(hl.both.combined) <- hl.both.combined$celltype.case
+comparators <- sort(unique(hl.both.combined$celltype.case)) # odd indices: diagnostic; even: relapse
+
+# initialize empty vector of results
+de.diag_vs_rel.clusters <- vector('list', NUM_CLUSTERS)
+
+# find DE genes between diagnostic vs. all relapse cases WITHIN EACH CLUSTER / CELL TYPE
+for (i in 1:NUM_CLUSTERS) {
+   tempResults <- FindMarkers(hl.both.combined, assay = "RNA",
+                          ident.1 = comparators[i], ident.2 = comparators[i+1], 
+                          test.use = "MAST", min.pct = 0.25, logfc.threshold = 0.25)
+   # make gene a column
+   tempResults$gene <- rownames(tempResults)
+   # add comparison description as a column
+   tempResults$comparison <- paste(comparators[i], "_VS_", comparators[i+1], sep = "")
+   rownames(tempResults) <- NULL
+   # change order of columns
+   cols <- c("comparison", "gene", "p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj")
+   tempResults <- tempResults[ cols ]
+   # sort by descending fold change
+   tempResults <- tempResults[order(-tempResults$avg_logFC), ]
+   # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
+   tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
+   # store the processed results in the final result array
+   de.diag_vs_rel.clusters[[i]] <- tempResults
+   i = i + 2
+}
+
+# Repeat cluster-specific comparisons for:
+#   diagnostic vs. refractory
+#   diagnostic vs. early relapse
+#   diagnostic vs. late relapse
+#   refractory vs. relapse
+#   early relapse vs. late relapse
 
 ```
 
