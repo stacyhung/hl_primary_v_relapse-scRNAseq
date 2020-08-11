@@ -875,45 +875,149 @@ for (i in 1:length(de.results)) {
 ## DE comparisons at the cluster (cell type) level
 
 ```{r}
-NUM_CLUSTERS = length(unique(hl.both.combined$celltype))
+# function to fine DE genes between all pairs
+get_de_genes <- function(comparators) {
 
+  NUM_CLUSTERS = length(comparators) / 2
+  
+  de_results <- vector('list', NUM_CLUSTERS)
+
+  for (i in 1:NUM_CLUSTERS) {
+    index.grp1 <- (i*2)-1
+    index.grp2 <- i*2
+    tempResults <- FindMarkers(hl.both.combined, assay = "RNA",
+                            ident.1 = comparators[index.grp1], ident.2 = comparators[index.grp2], 
+                            test.use = "MAST", min.pct = 0.25, logfc.threshold = 0.25)
+    # make gene a column
+    tempResults$gene <- rownames(tempResults)
+    # add comparison description as a column
+    tempResults$comparison <- paste(comparators[index.grp1], "_VS_", comparators[index.grp2], sep = "")
+    rownames(tempResults) <- NULL
+    # change order of columns
+    cols <- c("comparison", "gene", "p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj")
+    tempResults <- tempResults[ cols ]
+    # sort by descending fold change
+    tempResults <- tempResults[order(-tempResults$avg_logFC), ]
+    # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
+    tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
+    # store the processed results in the final result array
+    de_results[[i]] <- tempResults
+  }
+  
+  return(de_results)
+}
+
+# function to merge results into single dataframe
+merge_de_results <- function(results.vector) {
+  # initialize dataframe
+  merged.df <- data.frame(comparison = character(),
+                          gene = character(),
+                          p_val = double(),
+                          avg_logFC = double(),
+                          pct.1 = double(),
+                          pct.2 = double(),
+                          p_val_adj = double())
+  
+  NUM_CLUSTERS = length(results.vector)
+  for (i in 1:NUM_CLUSTERS) {
+    merged.df <- rbind(merged.df, results.vector[[i]])
+  }
+  return(merged.df)
+}
+```
+## diagnostic vs. relapse
+
+```{r}
 # define comparators
 hl.both.combined$celltype.case <- paste(hl.both.combined$celltype, hl.both.combined$case.type, sep = "_")
 Idents(hl.both.combined) <- hl.both.combined$celltype.case
 comparators <- sort(unique(hl.both.combined$celltype.case)) # odd indices: diagnostic; even: relapse
+de.diag_vs_rel.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_rel.clusters.df <- merge_de_results(de.diag_vs_rel.clusters)
+write.table(de.diag_vs_rel.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_rel.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+```
 
-# initialize empty vector of results
-de.diag_vs_rel.clusters <- vector('list', NUM_CLUSTERS)
+## diagnostic vs. refractory
 
-# find DE genes between diagnostic vs. all relapse cases WITHIN EACH CLUSTER / CELL TYPE
-for (i in 1:NUM_CLUSTERS) {
-   tempResults <- FindMarkers(hl.both.combined, assay = "RNA",
-                          ident.1 = comparators[i], ident.2 = comparators[i+1], 
-                          test.use = "MAST", min.pct = 0.25, logfc.threshold = 0.25)
-   # make gene a column
-   tempResults$gene <- rownames(tempResults)
-   # add comparison description as a column
-   tempResults$comparison <- paste(comparators[i], "_VS_", comparators[i+1], sep = "")
-   rownames(tempResults) <- NULL
-   # change order of columns
-   cols <- c("comparison", "gene", "p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj")
-   tempResults <- tempResults[ cols ]
-   # sort by descending fold change
-   tempResults <- tempResults[order(-tempResults$avg_logFC), ]
-   # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
-   tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
-   # store the processed results in the final result array
-   de.diag_vs_rel.clusters[[i]] <- tempResults
-   i = i + 2
-}
+```{r}
+# define comparators
+hl.both.combined$celltype.refractory <- paste(hl.both.combined$celltype, hl.both.combined$refractory, sep = "_")
+Idents(hl.both.combined) <- hl.both.combined$celltype.refractory 
+comparators <- sort(unique(hl.both.combined$celltype.refractory))
+# remove the "_relapseNotRefractory" case
+comparators <- comparators[ !grepl("_relapseNotRefractory", comparators)]
+# also remove the plasma cells comparison since the refractory group doesn't have enough cells
+comparators <- comparators[ !grepl("Plasma cells", comparators)]
+# perform the DE analysis
+de.diag_vs_refractory.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_refractory.clusters.df <- merge_de_results(de.diag_vs_refractory.clusters)
+write.table(de.diag_vs_refractory.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_refractory.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
-# Repeat cluster-specific comparisons for:
-#   diagnostic vs. refractory
-#   diagnostic vs. early relapse
-#   diagnostic vs. late relapse
-#   refractory vs. relapse
-#   early relapse vs. late relapse
+```
 
+## diagnostic vs. early relapse, diagnostic vs. late relapse
+
+```{r}
+# define comparators
+hl.both.combined$celltype.earlyrelapse <- paste(hl.both.combined$celltype, hl.both.combined$earlyRelapse, sep = "_")
+Idents(hl.both.combined) <- hl.both.combined$celltype.earlyrelapse 
+
+# diagnostic vs. early relapse
+comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
+# remove the "_lateRelapse" case
+comparators <- comparators[ !grepl("_lateRelapse", comparators)]
+# perform the DE analysis
+de.diag_vs_early_relapse.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_early_relapse.clusters.df <- merge_de_results(de.diag_vs_early_relapse.clusters)
+write.table(de.diag_vs_early_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_early_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+# diagnostic vs. late relapse
+comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
+# remove the "_earlyRelapse" case
+comparators <- comparators[ !grepl("_earlyRelapse", comparators)]
+# perform the DE analysis
+de.diag_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_late_relapse.clusters.df <- merge_de_results(de.diag_vs_late_relapse.clusters)
+write.table(de.diag_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+```
+
+## refractory vs. relapse
+
+```{r}
+# define comparators
+Idents(hl.both.combined) <- hl.both.combined$celltype.refractory 
+comparators <- rev(sort(unique(hl.both.combined$celltype.refractory)))
+# remove the "_diagnostic" case
+comparators <- comparators[ !grepl("_diagnostic", comparators)]
+# also remove the plasma cells comparison since the refractory group doesn't have enough cells
+comparators <- comparators[ !grepl("Plasma cells", comparators)]
+# perform the DE analysis
+de.refractory_vs_relapse.clusters <- get_de_genes(comparators = comparators)
+de.refractory_vs_relapse.clusters.df <- merge_de_results(de.refractory_vs_relapse.clusters)
+write.table(de.refractory_vs_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.refractory_vs_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+```
+
+## early relapse vs. late relapse
+
+```{r}
+# define comparators
+Idents(hl.both.combined) <- hl.both.combined$celltype.earlyrelapse 
+# early vs. late relapse
+comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
+# remove the "_diagnostic" case
+comparators <- comparators[ !grepl("_diagnostic", comparators)]
+# perform the DE analysis
+de.early_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
+de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relapse.clusters)
+write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.early_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+```
+
+## Visualize receptor-ligand interactions
+
+```{r}
 ```
 
 
