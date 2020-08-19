@@ -1,0 +1,61 @@
+---
+title: "HL_DE_analysis-iTALK_visualization"
+author: "Stacy Hung"
+date: "18/08/2020"
+output: html_document
+---
+
+
+
+```{r}
+library(iTALK)
+library(dplyr)
+
+# read the data - should have "cell_type" and "compare_group" column
+data <- read.table('~/Documents/sc_HL_relapse/data/expr.txt', sep=',', header = TRUE, stringsAsFactors = FALSE)
+comm_list <- c('growth factor','other','cytokine','checkpoint')
+cell_col <- structure(c('#4a84ad','#4a1dc6','#e874bf','#b79eed', '#ff636b', '#52c63b','#9ef49a'), 
+                      names = unique(data$cell_type))
+
+# Find DEGenes of regulatory T cells* and macrophages between these 2 groups.
+# Here T cells refers to one of: Naive T cells, CTL, Treg, and helper T cells.
+# Important! The contrasts refers to the two different group (values) -- in our case 2 = diagnostic and 1 = relapse
+deg.ctl <- DEG(data %>% filter(cell_type == 'CTL'), method='MAST', contrast = c(2,1))
+deg.macrophage <- DEG(data %>% filter(cell_type == 'Macrophage'), method='MAST', contrast = c(2,1))
+
+# find significant ligand-receptor pairs and do the plotting
+par(mfrow = c(1,2)) # create two panels for plotting
+res <- NULL # create an empty results dataframe
+
+for(comm_type in comm_list) {
+  res_cat <- FindLR(deg_t, deg_nk, datatype = 'DEG', comm_type = comm_type)
+  res_cat <- res_cat[ order(res_cat$cell_from_logFC*res_cat$cell_to_logFC, decreasing = T), ]
+  
+  # plot by ligand category
+  if(nrow(res_cat) == 0) {
+    next
+  } else if(nrow(res_cat >= 20)) {
+    LRPlot(res_cat[1:20, ], datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res_cat$cell_from_logFC[1:20],
+           link.arr.width = res_cat$cell_to_logFC[1:20])
+  } else {
+    LRPlot(res_cat, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res_cat$cell_from_logFC, 
+           link.arr.width = res_cat$cell_to_logFC)
+  }
+  NetView(res_cat, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
+  title(comm_type)
+  res <- rbind(res, res_cat)
+}
+
+if(is.null(res)) {
+  print('No significant pairs found')
+} else if(nrow(res) >= 20) {
+  res <- res[order(res$cell_from_logFC*res$cell_to_logFC, decreasing = T), ][1:20, ]
+  NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
+  LRPlot(res[1:20, ], datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC[1:20],
+         link.arr.width = res$cell_to_logFC[1:20])
+} else {
+  NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
+  LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, 
+         link.arr.width = res$cell_to_logFC)
+}
+```

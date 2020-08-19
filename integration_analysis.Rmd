@@ -530,7 +530,14 @@ hl.both.combined <- RenameIdents(hl.both.combined,
                            `21` = "Plasma cells"
                             )
 
-saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.annotated.rds")
+saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
+
+# output normalized expression values for differential expression analysis:
+norm.expr <- GetAssayData(object = hl.both.combined[["RNA"]], slot = "data")
+# using package scrattch.io
+write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
+# norm.expr.df <- as.data.frame(as.matrix(norm.expr))
+# write.table(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = "\t", )
 
 # Now plot the new annotations
 DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
@@ -715,34 +722,35 @@ library(cowplot)
 theme_set(theme_cowplot())
 library(MAST)
 library(DESeq2)
+library(Seurat)
 
-hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.annotated.rds")
+hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
 
 hl.both.combined$celltype.case <- paste(Idents(hl.both.combined), hl.both.combined$case.type, sep = "_")
 hl.both.combined$celltype <- Idents(hl.both.combined) # keep a copy of the cluster annotations
 Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main identity (for DE analysis)
 
 ## try out all the differential expression methods:
-de.methods <- c("wilcox", # NA's for p-values --> generic method
-                "bimod", # low discriminatory power with p-value (mostly 0's)
-                "roc", # 0 or 1 are good; 0.5 is bad classifer
-                "t", # 9 / 54 genes have p-value > 0 (and < 0.05)
-                "LR", #  9 / 54 genes have p-value > 0 (and < 0.05)
-                "MAST", #  2 / 54 genes have p-value > 0 (and < 0.05) --> **only scRNAseq method
-                "DESeq2", # doesn't work --> designed for bulk RNAseq
-                "negbinom", # doesn't work --> generic method
-                "poisson" # doesn't work --> generic method
-)
+# de.methods <- c("wilcox", # NA's for p-values --> generic method
+#                 "bimod", # low discriminatory power with p-value (mostly 0's)
+#                 "roc", # 0 or 1 are good; 0.5 is bad classifer
+#                 "t", # 9 / 54 genes have p-value > 0 (and < 0.05)
+#                 "LR", #  9 / 54 genes have p-value > 0 (and < 0.05)
+#                 "MAST", #  2 / 54 genes have p-value > 0 (and < 0.05) --> **only scRNAseq method
+#                 "DESeq2", # doesn't work --> designed for bulk RNAseq
+#                 "negbinom", # doesn't work --> generic method
+#                 "poisson" # doesn't work --> generic method
+# )
 
 # initialize empty vector of results
-de.results <- vector('list', length(de.methods))
+# de.results <- vector('list', length(de.methods))
 
 # find DE genes between all diagnostic vs. all relapse cases (not cluster-specific) for each method
-for (i in 1:length(de.methods)) {
-  de.results[[i]] <- FindMarkers(hl.both.combined, ident.1 = "relapse", ident.2 = "diagnostic", 
-                          test.use = de.methods[i],
-                          min.pct = 0.25, logfc.threshold = 0.25)
-}
+# for (i in 1:length(de.methods)) {
+  # de.results[[i]] <- FindMarkers(hl.both.combined, ident.1 = "relapse", ident.2 = "diagnostic", 
+                          # test.use = de.methods[i],
+                          # min.pct = 0.25, logfc.threshold = 0.25)
+# }
 ```
 
 ## Add labels to distinguish between early and late relapse cases
@@ -925,6 +933,7 @@ merge_de_results <- function(results.vector) {
   return(merged.df)
 }
 ```
+
 ## diagnostic vs. relapse
 
 ```{r}
@@ -1015,9 +1024,97 @@ write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seu
 
 ```
 
+## Write out subsetted expression data 
+
+```{r}
+library(dplyr)
+
+# extract expression profiles for macrophage and "T cell" annotated cell barcodes
+tcell_cluster_index <- 1
+tcell_clusters <- c("Naïve T cells", "CTL", "T regs", "Helper T cells")
+macrophage_cluster <- c("Macrophages")
+# clusters.keep <- c(macrophage_cluster, tcell_clusters[tcell_cluster_index])
+# get normalized expression values -- rownames are genes, colnames are cell barcodes
+norm.expr <- GetAssayData(object = hl.both.combined[["RNA"]], slot = "data")
+# get barcodes for cell type
+barcodes.celltype <- as.data.frame(hl.both.combined$celltype)
+# get barcodes for diagnostic / relapse
+barcodes.diag_vs_rel <- as.data.frame(hl.both.combined$case.type)
+# get barcodes for diagnostic / early relapse
+barcodes.diag_vs_early_rel <- as.data.frame(hl.both.combined$earlyRelapse)
+
+# create filtered expression matrix containing only macrophage and t cell clusters
+clusters.keep <- c(macrophage_cluster, tcell_clusters)
+barcodes.celltype.cluster_filtered <- filter(barcodes.celltype, barcodes.celltype$`hl.both.combined$celltype` %in% clusters.keep)
+expr.cluster_filtered <- norm.expr[, colnames(norm.expr) %in% rownames(barcodes.celltype.cluster_filtered)]
+
+# include "cell_type" column
+
+# include "compare_group" column indicating diagnostic / relapse OR diagnostic / early relapse
+
+# write out to ~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/expr/
+```
+
 ## Visualize receptor-ligand interactions
 
 ```{r}
+library(Seurat)
+library(scrattch.io)
+library(iTALK)
+
+hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
+
+# output normalized expression values for differential expression analysis:
+#norm.expr <- GetAssayData(object = hl.both.combined[["RNA"]], slot = "data")
+# using package scrattch.io
+#write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
+
+# read the data
+expr.df <- t(read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = ",", header = TRUE, stringsAsFactors = FALSE))
+
+# # make genes column names and row names cell barcodes
+# expr.df <- t(expr.df)
+
+# add column (e.g. "cell_type" to denote cluster annotations for each cell)
+case.type <- hl.both.combined$case.type
+
+## highly expressed ligand-receptor pairs
+
+# find top 50 percent highly expressed genes
+highly_exprs_genes <- rawParse(expr.df, top_genes = 50, stats='mean')
+
+# find the ligand-receptor pairs from highly expressed genes
+comm_list <- c('growth factor','other','cytokine','checkpoint')
+cell_col <- structure( c('#4a84ad','#4a1dc6','#e874bf','#b79eed', '#ff636b', '#52c63b','#9ef49a'),
+                       names = unique(data$cell_type)
+                      )
+par(mfrow = c(1,2))
+res <- NULL
+
+for(comm_type in comm_list) {
+  res_cat <- FindLR(highly_exprs_genes, 
+                    datatype = 'mean count',
+                    comm_type = comm_type)
+  res_cat <- res_cat[ order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs, decreasing = T), ]
+  
+  #plot by ligand category
+  # overall network plot
+  NetView(res_cat, col = cell_col, 
+          vertex.label.cex = 1, 
+          arrow.width = 1, 
+          edge.max.width = 5)
+  
+  #top 20 ligand-receptor pairs
+  LRPlot(res_cat[1:20, ], 
+         datatype = 'mean count', 
+         cell_col = cell_col, 
+         link.arr.lwd = res_cat$cell_from_mean_exprs[1:20],
+         link.arr.width = res_cat$cell_to_mean_exprs[1:20]
+        )
+  title(comm_type)
+  res <- rbind(res, res_cat)
+}
+
 ```
 
 
