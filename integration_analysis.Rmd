@@ -726,6 +726,10 @@ library(Seurat)
 
 hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
 
+# remove LSARP-15 (outlier)
+hl.both.combined <- subset (hl.both.combined, subset = orig.ident != "cHL-LSARP-15")
+# hl.both.combined <- subset (hl.both.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
+
 hl.both.combined$celltype.case <- paste(Idents(hl.both.combined), hl.both.combined$case.type, sep = "_")
 hl.both.combined$celltype <- Idents(hl.both.combined) # keep a copy of the cluster annotations
 Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main identity (for DE analysis)
@@ -943,7 +947,7 @@ Idents(hl.both.combined) <- hl.both.combined$celltype.case
 comparators <- sort(unique(hl.both.combined$celltype.case)) # odd indices: diagnostic; even: relapse
 de.diag_vs_rel.clusters <- get_de_genes(comparators = comparators)
 de.diag_vs_rel.clusters.df <- merge_de_results(de.diag_vs_rel.clusters)
-write.table(de.diag_vs_rel.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_rel.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.diag_vs_rel.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_rel.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 ```
 
 ## diagnostic vs. refractory
@@ -960,7 +964,7 @@ comparators <- comparators[ !grepl("Plasma cells", comparators)]
 # perform the DE analysis
 de.diag_vs_refractory.clusters <- get_de_genes(comparators = comparators)
 de.diag_vs_refractory.clusters.df <- merge_de_results(de.diag_vs_refractory.clusters)
-write.table(de.diag_vs_refractory.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_refractory.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.diag_vs_refractory.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_refractory.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 ```
 
@@ -978,7 +982,7 @@ comparators <- comparators[ !grepl("_lateRelapse", comparators)]
 # perform the DE analysis
 de.diag_vs_early_relapse.clusters <- get_de_genes(comparators = comparators)
 de.diag_vs_early_relapse.clusters.df <- merge_de_results(de.diag_vs_early_relapse.clusters)
-write.table(de.diag_vs_early_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_early_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.diag_vs_early_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_early_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 # diagnostic vs. late relapse
 comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
@@ -987,7 +991,7 @@ comparators <- comparators[ !grepl("_earlyRelapse", comparators)]
 # perform the DE analysis
 de.diag_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
 de.diag_vs_late_relapse.clusters.df <- merge_de_results(de.diag_vs_late_relapse.clusters)
-write.table(de.diag_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.diag_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.diag_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 ```
 
@@ -1004,7 +1008,7 @@ comparators <- comparators[ !grepl("Plasma cells", comparators)]
 # perform the DE analysis
 de.refractory_vs_relapse.clusters <- get_de_genes(comparators = comparators)
 de.refractory_vs_relapse.clusters.df <- merge_de_results(de.refractory_vs_relapse.clusters)
-write.table(de.refractory_vs_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.refractory_vs_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.refractory_vs_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.refractory_vs_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 ```
 
@@ -1020,7 +1024,7 @@ comparators <- comparators[ !grepl("_diagnostic", comparators)]
 # perform the DE analysis
 de.early_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
 de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relapse.clusters)
-write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/de.early_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.early_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
 ```
 
@@ -1048,81 +1052,44 @@ clusters.keep <- c(macrophage_cluster, tcell_clusters)
 barcodes.celltype.cluster_filtered <- filter(barcodes.celltype, barcodes.celltype$`hl.both.combined$celltype` %in% clusters.keep)
 expr.cluster_filtered <- norm.expr[, colnames(norm.expr) %in% rownames(barcodes.celltype.cluster_filtered)]
 
+## IMPORTANT: before appending columns, will likely need to output as matrix (since current object is dgCMatrix)
+write_dgCMatrix_csv(expr.cluster_filtered, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.macrophage_t_cell_clusters.txt", col1_name = "gene", chunk_size = 500)
+expr.cluster_filtered.df <- t(read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.macrophage_t_cell_clusters.txt", sep = ",", header = TRUE, stringsAsFactors = FALSE))
+cols <- expr.cluster_filtered.df[1, ]
+colnames(expr.cluster_filtered.df) <- cols
+expr.cluster_filtered.df <- expr.cluster_filtered.df[-1, ]
+# rename row names to replace "." with "-" so they can be compared to barcode annotations
+rownames(expr.cluster_filtered.df) <- gsub('\\.', '-', rownames(expr.cluster_filtered.df))
+
 # include "cell_type" column
+expr.cluster_filtered.df.anno <- merge(expr.cluster_filtered.df, barcodes.celltype, by="row.names")
+rownames(expr.cluster_filtered.df.anno) <- expr.cluster_filtered.df.anno$Row.names
 
 # include "compare_group" column indicating diagnostic / relapse OR diagnostic / early relapse
+expr.cluster_filtered.df.anno <- merge(expr.cluster_filtered.df.anno, barcodes.diag_vs_rel, by="row.names")
+rownames(expr.cluster_filtered.df.anno) <- expr.cluster_filtered.df.anno$Row.names
 
 # write out to ~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/expr/
+expr.cluster_filtered.df.anno <- merge(expr.cluster_filtered.df.anno, barcodes.diag_vs_early_rel, by="row.names")
+rownames(expr.cluster_filtered.df.anno) <- expr.cluster_filtered.df.anno$Row.names
+
+# clean up the matrix
+expr.cluster_filtered.df.anno$Row.names <- NULL
+colnames(expr.cluster_filtered.df.anno)[colnames(expr.cluster_filtered.df.anno) == 'Row.names'] <- 'barcode'
+colnames(expr.cluster_filtered.df.anno)[colnames(expr.cluster_filtered.df.anno) == 'hl.both.combined$celltype'] <- 'cell_type'
+colnames(expr.cluster_filtered.df.anno)[colnames(expr.cluster_filtered.df.anno) == 'hl.both.combined$case.type'] <- 'diag_rel'
+colnames(expr.cluster_filtered.df.anno)[colnames(expr.cluster_filtered.df.anno) == 'hl.both.combined$earlyRelapse'] <- 'diag_early_rel'
+
+# write out for input into iTALK
+write.table(expr.cluster_filtered.df.anno, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.macrophage_t_cell_clusters.annotated.txt", sep = "\t")
 ```
-
-## Visualize receptor-ligand interactions
-
-```{r}
-library(Seurat)
-library(scrattch.io)
-library(iTALK)
-
-hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
-
-# output normalized expression values for differential expression analysis:
-#norm.expr <- GetAssayData(object = hl.both.combined[["RNA"]], slot = "data")
-# using package scrattch.io
-#write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
-
-# read the data
-expr.df <- t(read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = ",", header = TRUE, stringsAsFactors = FALSE))
-
-# # make genes column names and row names cell barcodes
-# expr.df <- t(expr.df)
-
-# add column (e.g. "cell_type" to denote cluster annotations for each cell)
-case.type <- hl.both.combined$case.type
-
-## highly expressed ligand-receptor pairs
-
-# find top 50 percent highly expressed genes
-highly_exprs_genes <- rawParse(expr.df, top_genes = 50, stats='mean')
-
-# find the ligand-receptor pairs from highly expressed genes
-comm_list <- c('growth factor','other','cytokine','checkpoint')
-cell_col <- structure( c('#4a84ad','#4a1dc6','#e874bf','#b79eed', '#ff636b', '#52c63b','#9ef49a'),
-                       names = unique(data$cell_type)
-                      )
-par(mfrow = c(1,2))
-res <- NULL
-
-for(comm_type in comm_list) {
-  res_cat <- FindLR(highly_exprs_genes, 
-                    datatype = 'mean count',
-                    comm_type = comm_type)
-  res_cat <- res_cat[ order(res_cat$cell_from_mean_exprs*res_cat$cell_to_mean_exprs, decreasing = T), ]
-  
-  #plot by ligand category
-  # overall network plot
-  NetView(res_cat, col = cell_col, 
-          vertex.label.cex = 1, 
-          arrow.width = 1, 
-          edge.max.width = 5)
-  
-  #top 20 ligand-receptor pairs
-  LRPlot(res_cat[1:20, ], 
-         datatype = 'mean count', 
-         cell_col = cell_col, 
-         link.arr.lwd = res_cat$cell_from_mean_exprs[1:20],
-         link.arr.width = res_cat$cell_to_mean_exprs[1:20]
-        )
-  title(comm_type)
-  res <- rbind(res, res_cat)
-}
-
-```
-
 
 ## Visualizing differential expression
 
 ```{r}
 # violin plot split by dataset (primary vs. relapse) per gene showing expression across clusters ("celltype")
-hl.both.combined[["celltype"]] <- Idents(hl.both.combined)
+# hl.both.combined[["celltype"]] <- Idents(hl.both.combined)
+Idents(hl.both.combined) <- hl.both.combined$celltype
 
 # B and T cells
 plots <- VlnPlot(hl.both.combined, features = c("CD3D", "MS4A1"), 
@@ -1134,9 +1101,31 @@ plots <- VlnPlot(hl.both.combined, features = c("CTLA4", "LAG3"),
                  split.by = "case.type", group.by = "celltype", pt.size = 0, combine = FALSE)
 CombinePlots(plots = plots, ncol = 1)
 
-plots <- VlnPlot(hl.both.combined, features = markers.to.plot, split.by = "case.type",  group.by = "celltype", 
-    pt.size = 0, combine = FALSE)
-wrap_plots(plots = plots, ncol = 1)
+# genes of interest: "JUND", PD-L1 --> CD274 and  only found in RNA; 
+# CXCL12 (no alias? filtered out early on?)
+# CD123 --> IL3RA, CD30 --> TNFRSF8 
+genes <- c("PDCD1", "HAVCR2", "HLA-DRB5", 
+           "PRF1", "TNFRSF8", "MKI67",
+           "FOXP3", "CD163", "TIGIT",
+           "GZMA", "GZMB", "GZMK", 
+           "CXCR3", "CXCR4", "CXCL10", 
+           "CXCL13", "IFNG", "IL2", 
+           "IL4", "IL2RA", "IL3RA")
+VlnPlot(hl.both.combined, 
+        features = genes, 
+        split.by = "case.type", 
+        group.by = "celltype", 
+        pt.size = 0, 
+        ncol = 3, 
+        sort = "increasing",
+        combine = TRUE) + 
+  xlab("")
+# split.plot = TRUE
+# combine = FALSE)
+
+# plots <- VlnPlot(hl.both.combined, features = markers.to.plot, split.by = "case.type",  group.by = "celltype", 
+#     pt.size = 0, combine = FALSE)
+# wrap_plots(plots = plots, ncol = 1)
 
 ```
 
