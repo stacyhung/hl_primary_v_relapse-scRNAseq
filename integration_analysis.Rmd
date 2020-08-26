@@ -730,6 +730,12 @@ hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_
 hl.both.combined <- subset (hl.both.combined, subset = orig.ident != "cHL-LSARP-15")
 # hl.both.combined <- subset (hl.both.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
 
+# change default assay to RNA
+DefaultAssay(hl.both.combined) <- "RNA"
+# normalize and scale data for DE testing
+hl.both.combined <- NormalizeData(hl.both.combined)
+hl.both.combined <- ScaleData(hl.both.combined)
+
 hl.both.combined$celltype.case <- paste(Idents(hl.both.combined), hl.both.combined$case.type, sep = "_")
 hl.both.combined$celltype <- Idents(hl.both.combined) # keep a copy of the cluster annotations
 Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main identity (for DE analysis)
@@ -888,7 +894,7 @@ for (i in 1:length(de.results)) {
 
 ```{r}
 # function to fine DE genes between all pairs
-get_de_genes <- function(comparators) {
+get_de_genes <- function(comparators, de.test) {
 
   NUM_CLUSTERS = length(comparators) / 2
   
@@ -897,9 +903,15 @@ get_de_genes <- function(comparators) {
   for (i in 1:NUM_CLUSTERS) {
     index.grp1 <- (i*2)-1
     index.grp2 <- i*2
-    tempResults <- FindMarkers(hl.both.combined, assay = "RNA",
-                            ident.1 = comparators[index.grp1], ident.2 = comparators[index.grp2], 
-                            test.use = "MAST", min.pct = 0.25, logfc.threshold = 0.25)
+    # slot = "data" (normalized counts)
+    tempResults <- FindMarkers(hl.both.combined, 
+                               assay = "RNA", slot = "data",
+                               ident.1 = comparators[index.grp1], 
+                               ident.2 = comparators[index.grp2], 
+                               test.use = de.test, 
+                               latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+                               min.pct = 0.25, 
+                               logfc.threshold = 0)
     # make gene a column
     tempResults$gene <- rownames(tempResults)
     # add comparison description as a column
@@ -912,6 +924,8 @@ get_de_genes <- function(comparators) {
     tempResults <- tempResults[order(-tempResults$avg_logFC), ]
     # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
     tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
+    # remove results that have an adjusted p-value of 1
+    # tempResults <- filter(tempResults, tempResults$p_val_adj < 1)
     # store the processed results in the final result array
     de_results[[i]] <- tempResults
   }
@@ -938,6 +952,73 @@ merge_de_results <- function(results.vector) {
 }
 ```
 
+## For sanity purposes - test out the different methods: wilcox, bimod, roc, t, negbinom, poisson, LR, MAST, DESeq2
+
+```{r}
+de.test.mast <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "MAST", assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.wilcox <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "wilcox", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.bimod <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "bimod", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.roc <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "roc", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.t<- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "t", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.negbinom <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "negbinom", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.poisson <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "poisson", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.LR <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "LR", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+de.test.DESeq2 <- FindMarkers(hl.both.combined, 
+                       ident.1 = "Macrophages_diagnostic", 
+                       ident.2 = "Macrophages_relapse", 
+                       test.use = "DESeq2", 
+                       assay = "RNA", slot = "data",
+                       latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+```
+
 ## diagnostic vs. relapse
 
 ```{r}
@@ -945,8 +1026,10 @@ merge_de_results <- function(results.vector) {
 hl.both.combined$celltype.case <- paste(hl.both.combined$celltype, hl.both.combined$case.type, sep = "_")
 Idents(hl.both.combined) <- hl.both.combined$celltype.case
 comparators <- sort(unique(hl.both.combined$celltype.case)) # odd indices: diagnostic; even: relapse
-de.diag_vs_rel.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_rel.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.diag_vs_rel.clusters.df <- merge_de_results(de.diag_vs_rel.clusters)
+# de.diag_vs_rel.clusters.wilcox <- get_de_genes(comparators = comparators, de.test = "wilcox")
+# de.diag_vs_rel.clusters.wilcox.df <- merge_de_results(de.diag_vs_rel.clusters.wilcox)
 write.table(de.diag_vs_rel.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_rel.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 ```
 
@@ -962,7 +1045,7 @@ comparators <- comparators[ !grepl("_relapseNotRefractory", comparators)]
 # also remove the plasma cells comparison since the refractory group doesn't have enough cells
 comparators <- comparators[ !grepl("Plasma cells", comparators)]
 # perform the DE analysis
-de.diag_vs_refractory.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_refractory.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.diag_vs_refractory.clusters.df <- merge_de_results(de.diag_vs_refractory.clusters)
 write.table(de.diag_vs_refractory.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_refractory.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
@@ -980,7 +1063,7 @@ comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
 # remove the "_lateRelapse" case
 comparators <- comparators[ !grepl("_lateRelapse", comparators)]
 # perform the DE analysis
-de.diag_vs_early_relapse.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_early_relapse.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.diag_vs_early_relapse.clusters.df <- merge_de_results(de.diag_vs_early_relapse.clusters)
 write.table(de.diag_vs_early_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_early_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
@@ -989,7 +1072,7 @@ comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
 # remove the "_earlyRelapse" case
 comparators <- comparators[ !grepl("_earlyRelapse", comparators)]
 # perform the DE analysis
-de.diag_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
+de.diag_vs_late_relapse.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.diag_vs_late_relapse.clusters.df <- merge_de_results(de.diag_vs_late_relapse.clusters)
 write.table(de.diag_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
@@ -1006,7 +1089,7 @@ comparators <- comparators[ !grepl("_diagnostic", comparators)]
 # also remove the plasma cells comparison since the refractory group doesn't have enough cells
 comparators <- comparators[ !grepl("Plasma cells", comparators)]
 # perform the DE analysis
-de.refractory_vs_relapse.clusters <- get_de_genes(comparators = comparators)
+de.refractory_vs_relapse.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.refractory_vs_relapse.clusters.df <- merge_de_results(de.refractory_vs_relapse.clusters)
 write.table(de.refractory_vs_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.refractory_vs_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
@@ -1022,7 +1105,7 @@ comparators <- sort(unique(hl.both.combined$celltype.earlyrelapse))
 # remove the "_diagnostic" case
 comparators <- comparators[ !grepl("_diagnostic", comparators)]
 # perform the DE analysis
-de.early_vs_late_relapse.clusters <- get_de_genes(comparators = comparators)
+de.early_vs_late_relapse.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
 de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relapse.clusters)
 write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.early_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
@@ -1111,14 +1194,25 @@ genes <- c("PDCD1", "HAVCR2", "HLA-DRB5",
            "CXCR3", "CXCR4", "CXCL10", 
            "CXCL13", "IFNG", "IL2", 
            "IL4", "IL2RA", "IL3RA")
-VlnPlot(hl.both.combined, 
+
+sig.genes <- c("JUND", "IGKC", "TMSB4X", 
+               "HLA-DRB1", "XIST", "CXCL10", 
+               "CTSZ", "CD81", "CD79A", 
+               "SAT1", "IGHM", "CD74", 
+               "HIST1H2BG", "MALAT1", "IGHG4", 
+               "IGLC3", "IGLV6-57")
+
+genes <- c("CXCL10")
+
+p <- VlnPlot(hl.both.combined, 
         features = genes, 
-        split.by = "case.type", 
+        split.by = "earlyRelapse", log = TRUE,
         group.by = "celltype", 
         pt.size = 0, 
-        ncol = 3, 
-        sort = "increasing",
-        combine = TRUE) + 
+        ncol = 1, 
+        sort = "increasing", 
+        assay = "RNA", 
+        slot = "data") + 
   xlab("")
 # split.plot = TRUE
 # combine = FALSE)
@@ -1129,81 +1223,98 @@ VlnPlot(hl.both.combined,
 
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-Standard pre-processing workflow:
-
-  1) Selection and filtration of cells based on QC metrics
-  2) Data normalization, scaling, and detection of highly variable features (NEW: SCTransform function)
-
-## (1) Examine mitochondrial content and filter accordingly
-
-Metrics commonly used by the community:
-* Number of unique genes detected in each cell
-    => Low-quality cells / empty droplets will often have very few genes
-    => Cell doublets / multiplets may exhibit an aberrantly high gene count
-* Total number of molecules detected in each cell (strongly correlated with unique genes)
-* % of reads that map to mitochondrial genome
-    => low-quality / dying cells often exhibit extensive mitochondrial contamination
+## Volcano plots
 
 ```{r}
-# Get % reads that map to mitochondrial genome - add as column in metadata 
-# The `PercentageFeatureSet` function calculates % counts originating from a set of features - use set of genes starting with "MT-" as set of mitochondrial genes
+library(EnhancedVolcano)
+library(ggplot2)
+library(dplyr)
+library(plyr)
 
-hl_relapse.merged[["percent.mt"]] <- PercentageFeatureSet(hl_relapse.merged, pattern = "^MT-")
-head(hl_relapse.merged@meta.data, 5)
+results <- c(de.diag_vs_rel.clusters.df,
+             de.diag_vs_refractory.clusters.df,
+             de.diag_vs_early_relapse.clusters.df,
+             de.diag_vs_late_relapse.clusters.df,
+             de.refractory_vs_relapse.clusters.df,
+             de.early_vs_late_relapse.clusters.df)
 
-# Visualization transcript information by sample
-VlnPlot(hl_relapse.merged, 
-        features = c("nFeature_RNA", "percent.mt"),
-        sort = "increasing", log = FALSE,
-        ncol = 2, pt.size = 0)
+test.df <- de.diag_vs_rel.clusters.df
 
-scatter.1 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA",  feature2 = "percent.mt")
-scatter.2 <- FeatureScatter(hl_relapse.merged, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-CombinePlots(plots = list(scatter.1, scatter.2))
+#split "comparison" column by "_" and take the first split element to be cell_type
+test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
+test.df$group1 <- NULL
 
-# Filter out cells that have between 200-2500 unique features / genes and have less than 20 % mitochondria
-hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
-# Now working with 80,831 cells across 25 samples (average 3.2K cells)
-# or 76,607 cells using < 20% MT filter (average 3K cells)
+## ------ Enhanced volcano plot ------
 
-### And same thing for diagnostic dataset
+p.e <- EnhancedVolcano(test.df,
+    lab = test.df$gene,
+    title = 'diagnostic vs. relapse', subtitle = "",
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    FCcutoff = 0.25,
+    pCutoff = 10e-32)
 
-hl_diag.merged[["percent.mt"]] <- PercentageFeatureSet(hl_diag.merged, pattern = "^MT-")
-head(hl_diag.merged@meta.data, 5)
+# p.facets <- p.e + facet_grid(rows = vars(cell_type), scales = "free")
+p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
+  theme(strip.text.x = element_text(size = 14))
 
-# Visualization transcript information by sample
-VlnPlot(hl_diag.merged, 
-        features = c("nFeature_RNA", "percent.mt"),
-        sort = "increasing", log = FALSE,
-        ncol = 2, pt.size = 0)
+## --- manual volcano plot using ggplot2 ---
+
+y_axis_label <- expression(paste("-",Log[10], "(q-value)"))
+x_axis_label <- "Avg LogFC"
+
+# add annotation to de results for colouring on volcano plots - "group"
+#   min columns: gene, logFC, adjusted p-value, group
+#   groups: not sig + low FC, not sig + high FC, sig + low logFC, sig + high FC
+# label top 20 genes that are sig + high FC
+
+# x-axis: fold change (e.g. from -3 to +3)
+# y-axis: -log10(adj p-value)
+
+
+# filter out genes that have a low p-value and low fc
+# test.df <- filter(test.df, !(test.df$p_val_adj < 1e-100 & abs(test.df$avg_logFC) < 0.1))
+
+# assign groups for plot colors
+test.df <- test.df %>% mutate(
+  group = case_when(
+    p_val_adj < 0.05 & abs(avg_logFC) < 0.25 ~ "Significant, low logFC",
+    p_val_adj < 0.05 & abs(avg_logFC) >= 0.25 ~ "Significant, high logFC",
+    p_val_adj >= 0.05 & abs(avg_logFC) < 0.25 ~ "Not significant, low logFC",
+    p_val_adj >= 0.05 & abs(avg_logFC) >= 0.25 ~ "Not significant, high logFC"
+  )
+)
+
+# transform the p-values so they can be used for the volcano plot
+test.df$pValTrans <- -log10(test.df$p_val_adj)
+
+# plot genes of interest (to be labelled)
+p <- ggplot(test.df, aes(x=avg_logFC, y=pValTrans, color=group)) + 
+  geom_point(size = 2) +
+  labs(y=y_axis_label, x=x_axis_label, color="p < 0.05") +
+  scale_colour_manual(name="", 
+                      values = c("Not significant, high logFC"="darkgreen", 
+                                 "Not significant, low logFC"="darkgrey",
+                                 "Significant, low logFC"="royalblue", 
+                                 "Significant, high logFC"="red"),
+                      labels = c("Not significant, high logFC", 
+                                 "Not significant, low logFC", 
+                                 "Significant, low logFC",
+                                 "Significant, high logFC")) + 
+  theme(legend.position="bottom") 
+  # xlim(-2.5,2.5)
+
+p.facets <- p + facet_grid(rows = vars(comparison), scales = "free") + theme_gray(base_size = 14) 
+
+
+  # geom_hline(yintercept = -log10(0.05), linetype="dashed") +
+  # geom_vline(xintercept = -0.4849312,  linetype="dashed", color = "green") +
+  # geom_vline(xintercept = 0.5176877,  linetype="dashed", color = "green") +
+  # geom_vline(xintercept = -0.5264313,  linetype="dashed", color = "blue") +
+  # geom_vline(xintercept = 0.5604279,  linetype="dashed", color = "blue") +
 
 ```
 
-## Find differentially expressed features (cluster biomarkers)
-
-```{r}
-# find markers for every cluster compared to all remaining cells, report only the positive ones
-hl_relapse.merged.markers <- FindAllMarkers(hl_relapse.merged,
-                                            only.pos = TRUE,
-                                            min.pct = 0.25,
-                                            logfc.threshold = 0.25)
-top10 <- hl_relapse.merged.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
-write.table(top10, "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/top_10_de_markers-cluster_vs_all_other_clusters.txt", sep = "\t", row.names = FALSE, quote = FALSE)
-
-#top10 <- hl_relapse.merged %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
-DoHeatmap(hl_relapse.merged, features = top10$gene) + NoLegend()
-```
 
 ## Special request from Richard Corbett - what are the cell types for each barcode?
 
@@ -1245,108 +1356,5 @@ clusters.annotated.RC <- clusters.annotated.RC[ , keeps]
 
 # write to output
 write.table(clusters.annotated.RC, "~/Documents/sc_HL_relapse/for_Richard/lsarp_hl_relapse-annotations-RC_samples.txt", sep = "\t", row.names = FALSE, quote = FALSE)
-```
-
-Identify differentially expressed genes across conditions
-
-```{r}
-# add column to meta.data slot to contain information on cell type and dataset (primary vs. relapse)
-hl.combined$celltype.dataset <- paste(Idents(hl.combined), hl.combined$case_type, sep = "_")
-hl.combined$celltype <- Idents(hl.combined)
-Idents(hl.combined) <- "celltype.dataset"
-Idents(hl.combined) <- "celltype"
-
-# violin plot split by dataset (primary vs. relapse) per gene showing expression across clusters
-
-# B and T cells
-markers.to.plot <- c("CD3D", "MS4A1")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 1)
-
-# other clusters
-markers.to.plot <- c("SDC1", "NRP1", "GZMK")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 1)
-
-# LAG3 and CTLA4
-markers.to.plot <- c("CTLA4", "LAG3")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 1)
-
-# top differentially expressed genes in cluster 10 (primary cases only)
-markers.to.plot <- c("ISG15", "IFI6", "IFIT3", "IFI44L", "MX1", "IFIT1")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 2)
-
-# annotated genes that seem to be higher in primary vs. relapse
-markers.to.plot <- c("TNFSF10", "IL7R", "STAT1", "CCR7", "JUNB", "CD3E", "CD3G", "TRAC")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 1)
-
-markers.to.plot <- c("TNFSF10", "IRF1")
-plots <- VlnPlot(hl.combined, features = markers.to.plot, split.by = "case_type", group.by = "celltype", pt.size = 0, combine = FALSE)
-CombinePlots(plots = plots, ncol = 1)
-
-#FeaturePlot(hl.combined, features = c("TBX21", "GATA3", "IL17A", "RORC", "LAG3", "CD4", "IRF1"), min.cutoff = "q9")
-
-# Now find differentially expression markers for each cluster
-cluster10.cells <- subset(hl.combined, idents = c("10_primary", "10_relapse"))
-Idents(cluster10.cells) <- "case_type"
-avg.cluster10.cells <- log1p(AverageExpression(cluster10.cells, verbose = FALSE)$RNA)
-avg.cluster10.cells$gene <- rownames(avg.cluster10.cells)
-genes.to.label = c("CD8A", "CD8B", "TNFSF10", "GZMA", "GZMK")
-p <- ggplot(avg.cluster10.cells, aes(primary, relapse)) + geom_point() + ggtitle("cluster 10 cells")
-p <- LabelPoints(plot = p, points = genes.to.label, repel = TRUE, xnudge = 0, ynudge = 0)
-
-cluster10.de_genes <- FindMarkers(hl.combined, ident.1 = "10_primary", ident.2 = "10_relapse", verbose = FALSE)
-write.table(cluster10.de_genes, "/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/seurat/output/cluster10_de_markers-primary_v_relapse.txt", quote = FALSE, sep = "\t")
-```
-
-
-
-
-
-
-
-```{r}
-# find all markers distinguishing cluster 5 from clusters 0 and 3
-cluster5.markers <- FindMarkers(hl_relapse, ident.1 = 5, ident.2 = c(0,3), min.pct = 0.25)
-head(cluster5.markers, n=5)
-```
-
-```{r}
-# find markers for every cluster compare to all remaining cells and report only positive ones
-hl_relapse.markers <- FindAllMarkers(hl_relapse, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-# display the top 10 DE genes per cluster
-top_10_per_cluster <- hl_relapse.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
-write.table(top_10_per_cluster, "/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/seurat/output/top10_markers_per_cluster-20_PCs.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-
-# get classification power using ROC test
-hl_relapse.markers.ROC <- FindAllMarkers(hl_relapse, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, test.use = "roc")
-top_10_per_cluster.ROC <- hl_relapse.markers.ROC %>% group_by(cluster) %>% top_n(n = 10, wt = power)
-write.table(top_10_per_cluster.ROC, "/Volumes/shung/projects/LSARP-sc_HL_relapse_vs_primary/seurat/output/top10_markers_per_cluster-20_PCs-ROC_power.txt", sep = "\t", quote = FALSE, row.names = FALSE)
-```
-
-Seurat has several tests for differential expression that can be set with the test.use parameter - e.g. ROC test returns "classification power" for any individual marker (where 0 = random... 1 = perfect)
-
-```{r}
-cluster1.markers <- FindMarkers(hl_relapse, ident.1 = 0, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
-
-# see https://satijalab.org/seurat/v3.0/de_vignette.html for other tests that can be used for differential expression.
-
-# if you look at the head and tail of these results, you will notice that the results are sorted by decreasing power (i.e. top gene has the highest "classification power" - closest to 1)
-```
-
-# can plot raw counts too
-
-```{r}
-VlnPlot(hl_relapse, features = c("NkG7", "PF4"), slot = "counts", log = TRUE)
-```
-
-Create customized heatmaps to visualize expression (e.g. LAG3)
-
-```{r}
-# get the expression data
-GetAssayData(object = hl_relapse, slot = 'scale.data')[1:3, 1:3]
 ```
 
