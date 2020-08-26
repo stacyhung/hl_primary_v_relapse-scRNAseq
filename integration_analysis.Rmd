@@ -1231,14 +1231,15 @@ library(ggplot2)
 library(dplyr)
 library(plyr)
 
-results <- c(de.diag_vs_rel.clusters.df,
+results <- list(de.diag_vs_rel.clusters.df,
              de.diag_vs_refractory.clusters.df,
              de.diag_vs_early_relapse.clusters.df,
              de.diag_vs_late_relapse.clusters.df,
              de.refractory_vs_relapse.clusters.df,
              de.early_vs_late_relapse.clusters.df)
 
-test.df <- de.diag_vs_rel.clusters.df
+i <- 2
+test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
 test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
@@ -1270,7 +1271,6 @@ x_axis_label <- "Avg LogFC"
 
 # x-axis: fold change (e.g. from -3 to +3)
 # y-axis: -log10(adj p-value)
-
 
 # filter out genes that have a low p-value and low fc
 # test.df <- filter(test.df, !(test.df$p_val_adj < 1e-100 & abs(test.df$avg_logFC) < 0.1))
