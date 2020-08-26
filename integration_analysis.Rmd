@@ -1238,23 +1238,61 @@ results <- list(de.diag_vs_rel.clusters.df,
              de.refractory_vs_relapse.clusters.df,
              de.early_vs_late_relapse.clusters.df)
 
-i <- 2
+i <- 1
+title <- "diagnostic vs. relapse"
+# title <- "diagnostic vs. refractory"
+# title <- "diagnostic vs. early relapse"
+# title <- "diagnostic vs. late relapse"
+# title <- "refractory vs. relapse"
+# title <- "early vs. late relapse"
 test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
 test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
 test.df$group1 <- NULL
 
+# for combined volcano plot (all clusters plotted together in one plot), map shapes to cell types
+
+# create custom key-value pairs for different cell-types
+  # this can be achieved with nested ifelse statements
+keyvals.shape <- ifelse(test.df$cell_type == 'Helper T cells', 17,
+                 ifelse(test.df$cell_type == 'Naïve B cells', 15,
+                 ifelse(test.df$cell_type == 'T regs', 18,
+                 ifelse(test.df$cell_type == 'CD8 memory', 4,
+                 ifelse(test.df$cell_type == 'CTL', 3,
+                 ifelse(test.df$cell_type == 'Mature B cells', 0,
+                 ifelse(test.df$cell_type == 'Naïve T cells', 2,
+                 ifelse(test.df$cell_type == 'Proliferation (?)', 8, 19))))))))
+
+keyvals.shape[is.na(keyvals.shape)] <- 19
+names(keyvals.shape)[keyvals.shape == 19] <- 'other'
+names(keyvals.shape)[keyvals.shape == 17] <- 'Helper T cells'
+names(keyvals.shape)[keyvals.shape == 15] <- 'Naïve B cells'
+names(keyvals.shape)[keyvals.shape == 18] <- 'T regs'
+names(keyvals.shape)[keyvals.shape == 4] <- 'CD8 memory'
+names(keyvals.shape)[keyvals.shape == 3] <- 'CTL'
+names(keyvals.shape)[keyvals.shape == 0] <- 'Mature B cells'
+names(keyvals.shape)[keyvals.shape == 2] <- 'Naïve T cells'
+names(keyvals.shape)[keyvals.shape == 8] <- 'Proliferation'
+
 ## ------ Enhanced volcano plot ------
 
 p.e <- EnhancedVolcano(test.df,
     lab = test.df$gene,
-    title = 'diagnostic vs. relapse', subtitle = "",
+    title = title, subtitle = "",
     x = 'avg_logFC',
     y = 'p_val_adj',
     FCcutoff = 0.25,
-    pCutoff = 10e-32)
-
+    pCutoff = 10e-32,
+    shapeCustom = keyvals.shape,
+    legendPosition = 'right')
+,
+    drawConnectors = TRUE,
+    colConnectors = 'grey50',
+    legendLabSize = 12,
+    widthConnectors = 0.25
+    )
+  
 # p.facets <- p.e + facet_grid(rows = vars(cell_type), scales = "free")
 p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
   theme(strip.text.x = element_text(size = 14))
