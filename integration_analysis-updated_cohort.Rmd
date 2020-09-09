@@ -58,17 +58,24 @@ all.metrics <- rbind(primary.metrics, relapse.metrics)
 
 colnames(all.metrics) <- c("SampleID", "Est. Number of Cells", "Mean Reads / Cell", "Median Genes / Cell", "Sequencing Saturation (%)", "Fraction Reads in Cells (%)", "Total Genes Detected", "Dataset")
 
+# change sample with id 04-32704 to be in the relapse cohort (from diagnostic cohort)
+all.metrics <- all.metrics %>% mutate(Dataset = replace(Dataset, SampleID=='04-32704', 'relapse'))
+
+# sort by dataset and sampleID
+all.metrics <- all.metrics[ order(all.metrics$Dataset), ]
+# all.metrics$SampleID <- factor(all.metrics$SampleID)
+
 # convert from wide to long
 metrics.long <- gather(all.metrics, metric, value, "Est. Number of Cells":"Total Genes Detected")
 
 # faceted barplot for metrics of interest, and bars coloured by relapse vs. primary
-p <- ggplot(metrics.long, aes(x = SampleID, y = value, fill=Dataset)) + 
-      geom_bar(stat = "identity", width = 0.8) + 
-      facet_wrap( ~ metric, scales = "free") + 
-      xlab("") + ylab("") + 
-      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)) +
-      theme(panel.spacing = unit(1, "lines"))
-p
+# p <- ggplot(metrics.long, aes(x = SampleID, y = value, fill=Dataset)) + 
+#       geom_bar(stat = "identity", width = 0.8) + 
+#       facet_wrap( ~ metric, scales = "free") + 
+#       xlab("") + ylab("") + 
+#       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)) +
+#       theme(panel.spacing = unit(1, "lines"))
+# p
 
 # sorted version
 data.sorted <- metrics.long %>%
