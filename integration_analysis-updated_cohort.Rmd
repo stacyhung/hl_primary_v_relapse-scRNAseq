@@ -60,6 +60,8 @@ colnames(all.metrics) <- c("SampleID", "Est. Number of Cells", "Mean Reads / Cel
 
 # change sample with id 04-32704 to be in the relapse cohort (from diagnostic cohort)
 all.metrics <- all.metrics %>% mutate(Dataset = replace(Dataset, SampleID=='04-32704', 'relapse'))
+primary.metrics <- filter(all.metrics, all.metrics$Dataset == "diagnostic")
+relapse.metrics <- filter(all.metrics, all.metrics$Dataset == "relapse")
 
 # sort by dataset and sampleID
 all.metrics <- all.metrics[ order(all.metrics$Dataset), ]
@@ -101,8 +103,8 @@ p.sorted <- ggplot(data.sorted, aes(x = order, y = value, fill=Dataset)) +
 
 ```{r}
 ## Define dataset for analysis
-dataset_loc <- "~/Documents/sc_HL_relapse/cellranger-3.1.0"
-ids <- c("cHL-LSARP-01", "cHL-LSARP-02", "cHL-LSARP-03", "cHL-LSARP-06", "cHL-LSARP-07", "cHL-LSARP-08", "cHL-LSARP-05", "cHL-LSARP-09", "cHL-LSARP-10", "cHL-LSARP-11", "cHL-LSARP-12", "cHL-LSARP-13", "cHL-LSARP-14", "cHL-LSARP-15", "cHL-LSARP-16", "cHL-LSARP-17", "cHL-LSARP-18", "cHL-LSARP-19", "cHL-LSARP-20", "cHL-LSARP-21", "cHL-LSARP-22", "cHL-LSARP-23", "cHL-LSARP-24", "cHL-LSARP-25", "cHL-LSARP-26")
+dataset_loc <- "~/Documents/sc_HL_relapse/cellranger-3.1.0/relapse"
+ids <- relapse.metrics$SampleID
 
 # Note that 10X has an aggr function that combines multiple samples into a single count matrix, but for Seurat analysis, this is actually counterproductive since we will lose sample ids, so we will read in by sample here:
 d10x.data <- sapply(ids, function(i) {
@@ -124,35 +126,37 @@ hl_relapse.merged <- CreateSeuratObject(
 # total of 106,831 cells across 25 samples (average ~4K cells)
 
 hl_relapse.merged[["percent.mt"]] <- PercentageFeatureSet(hl_relapse.merged, pattern = "^MT-")
-hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
 
-# 76,607 cells or ~3K cells / sample
+# Visualization transcript information by sample
+VlnPlot(hl_relapse.merged, 
+        features = c("nFeature_RNA", "percent.mt"),
+        sort = "increasing", log = FALSE,
+        ncol = 2, pt.size = 0)
+
+hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 20)
+
+# 85,166 cells or ~3.4K cells / sample
 
 # add "relapse" label (in case we want to combine it with primary HL data later)
 hl_relapse.merged[["case.type"]] <- "relapse"
 
-## Add metadata for batch correction
-
-# for both datasets, sample names are under the "Sample" column and the "batch" would be the "GSCFlowcell" column
-hl_relapse.metadata <- read.table("~/Documents/sc_HL_relapse/data/relapse/library_info-relapse-cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
-
 # map batch information to orig.idents
 hl_relapse.merged$batch <- plyr::mapvalues(
     x = hl_relapse.merged$orig.ident, 
-    from = hl_relapse.metadata$Sample, 
-    to = hl_relapse.metadata$Chip
+    from = final.cohort$Sample, 
+    to = final.cohort$Batch
 )
 
-hl_relapse.celltypes <- read.table("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/hl_relapse-merged.sct-clusters.annotated.txt", sep = "\t", header = TRUE, fill = TRUE, stringsAsFactors = FALSE)
-hl_relapse.celltypes <- hl_relapse.celltypes [ order(hl_relapse.celltypes$barcode_sample), ]
+# hl_relapse.celltypes <- read.table("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/hl_relapse-merged.sct-clusters.annotated.txt", sep = "\t", header = TRUE, fill = TRUE, stringsAsFactors = FALSE)
+# hl_relapse.celltypes <- hl_relapse.celltypes [ order(hl_relapse.celltypes$barcode_sample), ]
+# 
+# hl_relapse.merged$celltype2 <- plyr::mapvalues(
+#     colnames(hl_relapse.merged), 
+#     hl_relapse.celltypes$barcode_sample, 
+#     hl_relapse.celltypes$cell_type
+# )
 
-hl_relapse.merged$celltype2 <- plyr::mapvalues(
-    colnames(hl_relapse.merged), 
-    hl_relapse.celltypes$barcode_sample, 
-    hl_relapse.celltypes$cell_type
-)
-
-saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-merged.rds")
+saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/updated_cohort/hl_relaspe_25-merged.rds")
 ```
 
 ## Read in raw data and meta data for diagnostic cases
@@ -160,7 +164,7 @@ saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_re
 ```{r}
 ## Define dataset for analysis
 dataset_loc <- "~/Documents/sc_HL_relapse/cellranger-3.1.0/primary"
-ids <- c("04-32704", "09-25099", "10-39536", "12-39704", "14-22984", "15-31135", "17-29163", "17-37524", "07-19278", "10-16486", "11-11363", "13-35368", "14-34982", "17-11527", "17-30019", "08-23834", "10-20817", "12-10493", "14-20419", "15-29662", "17-12745", "17-33404")
+ids <- primary.metrics$SampleID
 
 # Note that 10X has an aggr function that combines multiple samples into a single count matrix, but for Seurat analysis, this is actually counterproductive since we will lose sample ids, so we will read in by sample here:
 d10x.data <- sapply(ids, function(i) {
@@ -190,28 +194,22 @@ VlnPlot(hl_diag.merged,
         ncol = 2, pt.size = 0)
 
 # probably lowering the % MT cutoff to 10% won't make a difference (vs. keeping 20% using in relapse dataset)
-# based on violoin plots, the vast majority of the dataset sits < 5% MT
-hl_diag.merged <- subset (hl_diag.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 5)
+hl_diag.merged <- subset (hl_diag.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
 
-# 98,313 cells or 4,4K cells/sample
-table(hl_relapse.combined$orig.ident) # get specific numbers based on sample id
+# 73,163 cells or 4.6K cells/sample
+table(hl_diag.merged$orig.ident) # get specific numbers based on sample id
 
 # add "diagnostic" label (in case we want to combine it with primary HL data later)
 hl_diag.merged[["case.type"]] <- "diagnostic"
 
-# attach metadata
-
-# for both datasets, sample names are under the "Sample" column and the "batch" would be the "Chip" column
-hl_diag.metadata <- read.table("~/Documents/sc_HL_relapse/data/primary/library_info-primary_cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
-
 # map batch information to orig.idents 
 hl_diag.merged$batch <- plyr::mapvalues(
     x = hl_diag.merged$orig.ident, 
-    from = hl_diag.metadata$Sample, 
-    to = hl_diag.metadata$Chip
+    from = final.cohort$Sample, 
+    to = final.cohort$Batch
 )
 
-saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag.merged.rds")
+saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag.merged.rds")
 ```
 
 ## Batch correction using Seurat 3
