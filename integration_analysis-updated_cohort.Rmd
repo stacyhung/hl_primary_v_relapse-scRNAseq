@@ -70,15 +70,6 @@ all.metrics <- all.metrics[ order(all.metrics$Dataset), ]
 # convert from wide to long
 metrics.long <- gather(all.metrics, metric, value, "Est. Number of Cells":"Total Genes Detected")
 
-# faceted barplot for metrics of interest, and bars coloured by relapse vs. primary
-# p <- ggplot(metrics.long, aes(x = SampleID, y = value, fill=Dataset)) + 
-#       geom_bar(stat = "identity", width = 0.8) + 
-#       facet_wrap( ~ metric, scales = "free") + 
-#       xlab("") + ylab("") + 
-#       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)) +
-#       theme(panel.spacing = unit(1, "lines"))
-# p
-
 # sorted version
 data.sorted <- metrics.long %>%
   ungroup() %>%
@@ -212,7 +203,7 @@ hl_diag.merged$batch <- plyr::mapvalues(
 saveRDS(hl_diag.merged, file = "~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag.merged.rds")
 ```
 
-## Batch correction using Seurat 3
+## Batch correction / integration using Seurat 3
 
 ```{r}
 # Using anchor method, integrate datasets by BATCH ("Chip" column) for HL relapse cases
@@ -229,19 +220,22 @@ hl_relapse.split <- lapply(X = hl_relapse.split, FUN = function(x) {
 hl_relapse.anchors <- FindIntegrationAnchors(object.list = hl_relapse.split, dims = 1:20)
 
 # Save object so that it can be loaded without having to re-run computationally intensive steps again
-#saveRDS(hl_relapse.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-anchors_v2.rds") # 1GB
+# saveRDS(hl_relapse.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/updated_cohort/ hl_relaspe_25-anchors.rds") # 1GB
 
 # read back in if necessary
-hl_relapse.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/split_by_chip/hl_relaspe_25-anchors_v2.rds")
+hl_relapse.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/split_by_chip/hl_relaspe_25-anchors.rds")
 
 # Use anchors to integrate the datasets together
 hl_relapse.combined <- IntegrateData(anchorset = hl_relapse.anchors, dims = 1:20) # very memory intensive (requires over 42GB - performed on work computer and saved resulting RDS object)
-#saveRDS(hl_relapse.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined_v2.rds") # 1GB
+# saveRDS(hl_relapse.combined, file = "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/updated_cohort/hl_relaspe_25-combined.rds") # 1GB
+```
 
+(optional:) analyse the individual datasets (relapse)
+
+```{r}
 hl_relapse.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined.rds")
 
 # Now perform the integrated analysis
-DefaultAssay(hl_relapse.combined) <- "integrated"
 
 # get list of highly-variable genes
 hl_relapse.hvg <- hl_relapse.combined@assays$integrated@var.features
@@ -280,19 +274,22 @@ hl_diag.split <- lapply(X = hl_diag.split, FUN = function(x) {
 hl_diag.anchors <- FindIntegrationAnchors(object.list = hl_diag.split, dims = 1:20)
 
 # Save object so that it can be loaded without having to re-run computationally intensive steps again
-#saveRDS(hl_diag.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-anchors.rds") # 1GB
+# saveRDS(hl_diag.anchors, file = "~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag_22-anchors.rds") # 1GB
 
 # read back in if necessary
-#hl_diag.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-anchors.rds")
+hl_diag.anchors <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag_22-anchors.rds")
 
 # Use anchors to integrate the datasets together
 hl_diag.combined <- IntegrateData(anchorset = hl_diag.anchors, dims = 1:20) # very memory intensive (requires over 42GB - performed on work computer and saved resulting RDS object)
-#saveRDS(hl_diag.combined, file = "~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined.rds") # 1GB
+# saveRDS(hl_diag.combined, file = "~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag_22-combined.rds") # 1GB
+```
 
-#hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined.rds")
+(optional:) analyse the individual datasets (diagnostic)
+
+```{r}
+hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag_22-combined.rds")
 
 # Now perform the integrated analysis
-DefaultAssay(hl_diag.combined) <- "integrated"
 
 # Run standard workflow of visualization and clustering
 hl_diag.combined <- ScaleData(hl_diag.combined)
@@ -314,14 +311,16 @@ p.seurat.cluster <- DimPlot(hl_diag.combined, reduction = "umap", label = TRUE)
 ## Now integrate relapse and diagnostic
 
 ```{r}
-hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_diag_22-combined-final.rds")
-hl_relapse.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/hl_relaspe_25-combined_final.rds")
+hl_diag.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_updated_16/hl_diag_22-combined.rds")
+hl_relapse.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/updated_cohort/hl_relaspe_25-combined.rds")
 
+# memory-intensive -- must perform on GSC project space:
 hl.both.anchors <- FindIntegrationAnchors(object.list = list(hl_diag.combined, 
                                                              hl_relapse.combined), 
                                           dims = 1:20)
 # saved on GSC projects space: /home/shung/share/projects/shung/lsarp_hl_relapse_sc/seurat/output/hl.both.anchors.rds
 
+# also to perform on GSC space
 hl.both.combined <- IntegrateData(anchorset = hl.both.anchors, dims = 1:20) # memory-intensive step
 
 # saved on GSC projects space: /home/shung/share/projects/shung/lsarp_hl_relapse_sc/seurat/output/hl.both.combined.rds
