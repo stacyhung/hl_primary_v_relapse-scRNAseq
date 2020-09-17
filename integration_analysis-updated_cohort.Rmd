@@ -106,7 +106,58 @@ p <- ggplot(metrics.long, aes(x = SampleID, y = value, fill=Dataset)) +
       scale_fill_manual(values=c("cornflowerblue", "lightcoral", "gray40"))
 ```
 
-## Read in the dataset and create a Seurat object - to serve as a container for both data (e.g. count matrix) and analyses (e.g. PCA, clustering, etc.) for a single-cell dataset.  See https://github.com/satijalab/seurat/wiki for technical details on the Seurat object.
+## RLN cases: read in raw data, perform initial filtering and map meta data
+
+```{r}
+## Define dataset for analysis
+dataset_loc <- "~/Documents/sc_HL_relapse/cellranger-3.1.0/RLN"
+ids <- rln.metrics$SampleID
+
+# Note that 10X has an aggr function that combines multiple samples into a single count matrix, but for Seurat analysis, this is actually counterproductive since we will lose sample ids, so we will read in by sample here:
+d10x.data <- sapply(ids, function(i) {
+  d10x <- Read10X(file.path(dataset_loc, i, ""))
+  colnames(d10x) <- paste(sapply(strsplit(colnames(d10x), split="-"), '[[', 1L), i, sep="_")
+                          d10x
+})
+
+experiment.data <- do.call("cbind", d10x.data)
+
+hl_rln.merged <- CreateSeuratObject(
+  experiment.data,
+  project = "RLN merged",
+  min.cells = 10, # keep all genes that are expressed in at least 3 cells --> might be too lenient for scTransform
+  min.features = 200, # keep all cells that are expressing at least 200 transcripts
+  names.field = 2, # the sample id is in the 2nd column after applying the delimiter "_"
+  names.delim = "\\_" # the delimiter
+)
+# total of 15,771 cells across 4 samples (average 3.9K cells / sample)
+
+hl_rln.merged[["percent.mt"]] <- PercentageFeatureSet(hl_rln.merged, pattern = "^MT-")
+
+# Visualization transcript information by sample
+VlnPlot(hl_rln.merged, 
+        features = c("nFeature_RNA", "percent.mt"),
+        sort = "increasing", log = FALSE,
+        ncol = 2, pt.size = 0)
+
+hl_rln.merged <- subset(hl_rln.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 10)
+
+# 15,139 cells or ~3.8K cells / sample
+
+# add "relapse" label (in case we want to combine it with primary HL data later)
+hl_rln.merged[["case.type"]] <- "RLN"
+
+# map batch information to orig.idents
+hl_rln.merged$batch <- plyr::mapvalues(
+    x = hl_rln.merged$orig.ident, 
+    from = final.cohort$Sample, 
+    to = final.cohort$Batch
+)
+
+saveRDS(hl_rln.merged, file = "~/Documents/sc_HL_relapse/seurat/output/LATEST/RLN-merged.rds")
+```
+
+## Relapse cases: read in raw data, perform initial filtering, and map meta data
 
 ```{r}
 ## Define dataset for analysis
@@ -140,7 +191,7 @@ VlnPlot(hl_relapse.merged,
         sort = "increasing", log = FALSE,
         ncol = 2, pt.size = 0)
 
-hl_relapse.merged <- subset (hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 20)
+hl_relapse.merged <- subset(hl_relapse.merged, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 20)
 
 # 85,166 cells or ~3.4K cells / sample
 
@@ -154,19 +205,10 @@ hl_relapse.merged$batch <- plyr::mapvalues(
     to = final.cohort$Batch
 )
 
-# hl_relapse.celltypes <- read.table("~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/hl_relapse-merged.sct-clusters.annotated.txt", sep = "\t", header = TRUE, fill = TRUE, stringsAsFactors = FALSE)
-# hl_relapse.celltypes <- hl_relapse.celltypes [ order(hl_relapse.celltypes$barcode_sample), ]
-# 
-# hl_relapse.merged$celltype2 <- plyr::mapvalues(
-#     colnames(hl_relapse.merged), 
-#     hl_relapse.celltypes$barcode_sample, 
-#     hl_relapse.celltypes$cell_type
-# )
-
 saveRDS(hl_relapse.merged, file = "~/Documents/sc_HL_relapse/seurat/output/relapse-all_25_merged/updated_cohort/hl_relaspe_25-merged.rds")
 ```
 
-## Read in raw data and meta data for diagnostic cases
+## Diagnostic cases: read in raw data, perform initial filtering, and map meta data
 
 ```{r}
 ## Define dataset for analysis
