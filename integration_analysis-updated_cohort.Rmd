@@ -28,8 +28,12 @@ library(harmony)
 ## Examine QC metrics
 
 ```{r}
-final.cohort <- read.table("~/Documents/sc_HL_relapse/data/final_cohort.txt", sep = "\t", header = TRUE, fill = TRUE)
+final.cohort <- read.table("~/Documents/sc_HL_relapse/data/final_cohort.plus_RLN.txt", sep = "\t", header = TRUE, fill = TRUE)
 final.cohort <- filter(final.cohort, final.cohort$FinalCohort == "yes")
+
+rln.metrics <- read.table("~/Documents/sc_HL_relapse/metrics/RLN_metrics.txt", sep = "\t", header = TRUE, fill = TRUE)
+rln.metrics <- filter(rln.metrics, rln.metrics$SampleID %in% final.cohort$Sample)
+rln.metrics$dataset <- "RLN"
 
 relapse.metrics <- read.table("~/Documents/sc_HL_relapse/metrics/all.relapse.metrics.txt", sep = "\t", header = TRUE, fill = TRUE)
 relapse.metrics <- filter(relapse.metrics, relapse.metrics$SampleID %in% final.cohort$Sample)
@@ -52,9 +56,10 @@ primary.metrics$dataset <- "diagnostic"
 keeps <- c("SampleID", "Estimated.Number.of.Cells", "Mean.Reads.per.Cell", "Median.Genes.per.Cell", "Sequencing.Saturation", "Fraction.Reads.in.Cells", "Total.Genes.Detected", "dataset")
 relapse.metrics <- relapse.metrics[c(keeps)]
 primary.metrics <- primary.metrics[c(keeps)]
+rln.metrics <- rln.metrics[c(keeps)]
 
 # combine datasets
-all.metrics <- rbind(primary.metrics, relapse.metrics)
+all.metrics <- rbind(primary.metrics, relapse.metrics, rln.metrics)
 
 colnames(all.metrics) <- c("SampleID", "Est. Number of Cells", "Mean Reads / Cell", "Median Genes / Cell", "Sequencing Saturation (%)", "Fraction Reads in Cells (%)", "Total Genes Detected", "Dataset")
 
@@ -62,6 +67,7 @@ colnames(all.metrics) <- c("SampleID", "Est. Number of Cells", "Mean Reads / Cel
 all.metrics <- all.metrics %>% mutate(Dataset = replace(Dataset, SampleID=='04-32704', 'relapse'))
 primary.metrics <- filter(all.metrics, all.metrics$Dataset == "diagnostic")
 relapse.metrics <- filter(all.metrics, all.metrics$Dataset == "relapse")
+rln.metrics <- filter(all.metrics, all.metrics$Dataset == "RLN")
 
 # sort by dataset and sampleID
 all.metrics <- all.metrics[ order(all.metrics$Dataset), ]
@@ -74,20 +80,30 @@ metrics.long <- gather(all.metrics, metric, value, "Est. Number of Cells":"Total
 data.sorted <- metrics.long %>%
   ungroup() %>%
   arrange(metric, value) %>%
-  mutate(order = row_number())
+  dplyr::mutate(order = row_number())
 
+# colors: diagnostic - royal blue; relapse - light red; RLN - light purple
 p.sorted <- ggplot(data.sorted, aes(x = order, y = value, fill=Dataset)) + 
       geom_bar(stat = "identity", width = 0.8) + 
       facet_wrap( ~ metric, scales = "free") + 
       xlab("") + ylab("") + 
       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 3)) +
       theme(panel.spacing = unit(1, "lines")) +
+      scale_fill_manual(values=c("cornflowerblue", "lightcoral", "gray40")) +
       scale_x_continuous(
         breaks = data.sorted$order,
         labels = data.sorted$SampleID,
         expand = c(0,0)
       )
 
+# unsorted
+p <- ggplot(metrics.long, aes(x = SampleID, y = value, fill=Dataset)) + 
+      geom_bar(stat = "identity", width = 0.8) + 
+      facet_wrap( ~ metric, scales = "free") + 
+      xlab("") + ylab("") + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 3)) +
+      theme(panel.spacing = unit(1, "lines")) +
+      scale_fill_manual(values=c("cornflowerblue", "lightcoral", "gray40"))
 ```
 
 ## Read in the dataset and create a Seurat object - to serve as a container for both data (e.g. count matrix) and analyses (e.g. PCA, clustering, etc.) for a single-cell dataset.  See https://github.com/satijalab/seurat/wiki for technical details on the Seurat object.
@@ -324,31 +340,12 @@ hl.both.anchors <- FindIntegrationAnchors(object.list = list(hl_diag.combined,
 hl.both.combined <- IntegrateData(anchorset = hl.both.anchors, dims = 1:20) # memory-intensive step
 
 # saved on GSC projects space: /home/shung/share/projects/shung/lsarp_hl_relapse_sc/seurat/output/hl.both.combined.rds
-hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.rds")
-```
-
-## Output from finding integration anchors between diagnostic + relapse datasets
-
-```{r}
-#Computing 2000 integration features
-#Scaling features for provided objects
-#  |++++++++++++++++++++++++++++++++++++++++++++++++++| 100% elapsed=02m 17s
-#Finding all pairwise anchors
-#  |                                                  | 0 % ~calculating  Running CCA
-#Merging objects
-#Finding neighborhoods
-#Finding anchors
-#	Found 150263 anchors
-#Filtering anchors
-#	Retained 20853 anchors
-#  |++++++++++++++++++++++++++++++++++++++++++++++++++| 100% elapsed=04h 47m 05s
+hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/updated-diag_plus_relapse/hl.both.combined.rds")
 ```
 
 ## Perform integrated analysis
 
 ```{r}
-DefaultAssay(hl.both.combined) <- "integrated"
-
 # run the standard workflow for visualization and clustering
 hl.both.combined <- ScaleData(hl.both.combined)
 hl.both.combined <- RunPCA(hl.both.combined, npcs = 30)
@@ -358,7 +355,7 @@ hl.both.combined <- RunUMAP(hl.both.combined, reduction = "pca", dims = 1:20)
 hl.both.combined <- FindNeighbors(hl.both.combined, reduction = "pca", dims = 1:20)
 hl.both.combined <- FindClusters(hl.both.combined, resolution = 0.5)
 
-saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.integrated.clustered.rds")
+saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/updated-diag_plus_relapse/hl.integrated.clustered.rds")
 
 # Visualization
 p1 <- DimPlot(hl.both.combined, reduction = "umap", group.by = "case.type") # split by cohort (diag vs. relapse)
@@ -369,7 +366,7 @@ p3 <- DimPlot(hl.both.combined, reduction = "umap", split.by = "case.type")
 
 # get list of highly-variable genes
 hl.both.hvg <- hl.both.combined@assays$integrated@var.features
-write.table(hl.both.hvg, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.integrated.hgv.txt", sep = "\t", quote = FALSE)
+write.table(hl.both.hvg, "~/Documents/sc_HL_relapse/seurat/output/updated-diag_plus_relapse/hl.both.integrated.hgv.txt", sep = "\t", quote = FALSE)
 
 # Examine expression of component marker genes (n=47+) to help annotate clusters
 # extract markers of interest
@@ -454,7 +451,13 @@ pheatmap(hl.integrated.components.cluster.avgs.ordered,
 ```{r}
 library(gridExtra)
 
-NUM_CLUSTERS = 22
+NUM_CLUSTERS = 23
+
+hl.integrated.scaled <- hl.both.combined@assays$integrated@scale.data
+# this is a 1559 (features) X 76607 (barcodes) matrix
+
+# test case to see how colours of heatmap changes
+hl.integrated.scaled <- hl.both.combined@assays$integrated@data
 
 # retrieve expression for each cell across the component genes of interest
 hl.integrated.markers <- hl.integrated.scaled[ rownames(hl.integrated.scaled) %in% markers.to.plot , ]
@@ -489,11 +492,11 @@ barcodes <- vector('list', NUM_CLUSTERS)
 expr <- vector('list', NUM_CLUSTERS)
 heatmaps <- vector('list', NUM_CLUSTERS)
 
-for (c in 0:21) {
+for (c in 1:NUM_CLUSTERS) {
   # store list of barcodes by cluster c
-  barcodes[[c+1]] <- filter(clusters.df, clusters.df$clusters.char == c)
-  expr[[c+1]] <- hl.integrated.markers.ordered[, colnames(hl.integrated.markers.ordered) %in% barcodes[[c+1]]$barcodes.cluster ]
-  heatmaps[[c+1]] <- pheatmap(expr[[c+1]], 
+  barcodes[[c]] <- filter(clusters.df, clusters.df$clusters.char == c-1)
+  expr[[c]] <- hl.integrated.markers.ordered[, colnames(hl.integrated.markers.ordered) %in% barcodes[[c]]$barcodes.cluster ]
+  heatmaps[[c]] <- pheatmap(expr[[c]], 
          annotation_row = components.ordered, 
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
