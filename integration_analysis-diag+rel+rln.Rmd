@@ -479,7 +479,7 @@ library(ggplot2)
 library(dplyr)
 
 # Tomo's latest mappings (as of July 21, 2020)
-hl.both.combined <- RenameIdents(hl.both.combined, 
+hl_all.combined <- RenameIdents(hl_all.combined, 
                            `0` = "Naïve B cells", 
                            `1` = "Helper T cells", 
                            `2` = "Helper T cells", 
@@ -504,22 +504,22 @@ hl.both.combined <- RenameIdents(hl.both.combined,
                            `21` = "Plasma cells"
                             )
 
-saveRDS(hl.both.combined, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.rds")
 
 # output normalized expression values for differential expression analysis:
-norm.expr <- GetAssayData(object = hl.both.combined[["RNA"]], slot = "data")
+norm.expr <- GetAssayData(object = hl_all.combined[["RNA"]], slot = "data")
 # using package scrattch.io
-write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
+write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
 # norm.expr.df <- as.data.frame(as.matrix(norm.expr))
 # write.table(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = "\t", )
 
 # Now plot the new annotations
-DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
-DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "case.type")
-#DimPlot(hl.both.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident")
+DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
+DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "case.type")
+#DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident")
 
 # create a barplot to show the numbers of cells in each cluster / component type
-celltype.numcells <- as.data.frame(table(hl.both.combined$celltype))
+celltype.numcells <- as.data.frame(table(hl_all.combined$celltype))
 colnames(celltype.numcells) <- c("celltype", "numcells")
 p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) + 
       geom_bar(stat = "identity", width = 0.8, fill="darkblue") + 
@@ -531,7 +531,7 @@ p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) +
       coord_flip()
 
 # create a stacked barplot to show the proportion of each cell identity by sample
-sample.celltype_num <- as.data.frame(table(hl.both.combined$orig.ident, hl.both.combined$celltype))
+sample.celltype_num <- as.data.frame(table(hl_all.combined$orig.ident, hl_all.combined$celltype))
 colnames(sample.celltype_num) <- c("sample_id", "cell_identity", "num_cells")
 
 # order by proportion of naive B cells
@@ -570,7 +570,7 @@ p <- ggplot(sample.celltype_num,
   ylab("")
 
 # rename clusters to only contain letters (for DotPlot only)
-hl.both.combined  <- RenameIdents(hl.both.combined,
+hl_all.combined  <- RenameIdents(hl_all.combined,
                                   `Plasma cells` = "plasmaCells",
                                   `Macrophages` = "macrophages",
                                   `pDC` = "pDC",
@@ -589,7 +589,7 @@ hl.both.combined  <- RenameIdents(hl.both.combined,
 # Plot expression of component genes for both case types, side-by-side
 
 DotPlot(
-    object = hl.both.combined,
+    object = hl_all.combined,
     features = rev(markers.to.plot), 
     dot.scale = 8,
     split.by = "case.type", cols = c("red", "blue"), scale = TRUE) + 
