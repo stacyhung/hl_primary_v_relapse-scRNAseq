@@ -479,44 +479,45 @@ library(ggplot2)
 library(dplyr)
 
 # Tomo's latest mappings (as of July 21, 2020)
-hl_all.combined <- RenameIdents(hl_all.combined, 
-                           `0` = "Naïve B cells", 
-                           `1` = "Helper T cells", 
-                           `2` = "Helper T cells", 
-                           `3` = "T regs",
-                           `4` = "Naïve B cells", 
-                           `5` = "Mature B cells",
-                           `6` = "Naïve T cells",
-                           `7` = "CTL",
-                           `8` = "Helper T cells",
-                           `9` = "Naïve B cells",
-                           `10` = "CD8 memory",
-                           `11` = "Naïve B cells",
-                           `12` = "T regs",
-                           `13` = "Naïve T cells",
-                           `14` = "Helper T cells",
-                           `15` = "GCB",
-                           `16` = "B and T mix (progenitor?)",
-                           `17` = "Proliferation (?)",
-                           `18` = "NK cells",
-                           `19` = "pDC",
-                           `20` = "Macrophages",
-                           `21` = "Plasma cells"
-                            )
-
+hl_all.combined <- RenameIdents(hl_all.combined,
+                                `0` = "B cells",
+                                `1` = "Helper T cells",
+                                `2` = "B cells",
+                                `3` = "Naive T cells",
+                                `4` = "Treg",
+                                `5` = "Helper T cells",
+                                `6` = "B cells",
+                                `7` = "B cells",
+                                `8` = "CTL",
+                                `9` = "B cells",
+                                `10` = "Helper T cells",
+                                `11` = "Treg",
+                                `12` = "Naive T cells",
+                                `13` = "Naive T cells",
+                                `14` = "B cells",
+                                `15` = "NK cells",
+                                `16` = "B and T mix",
+                                `17` = "Treg proliferation",
+                                `18` = "GCB",
+                                `19` = "Plasma cell",
+                                `20` = "Macrophage",
+                                `21` = "Plasmacytoid DCs",
+                                `22` = "B cells, macrophages",
+                                `23` = "CTL")
+hl_all.combined$celltype <- Idents(hl_all.combined)
 saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.rds")
 
 # output normalized expression values for differential expression analysis:
 norm.expr <- GetAssayData(object = hl_all.combined[["RNA"]], slot = "data")
+
 # using package scrattch.io
-write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
+# write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
 # norm.expr.df <- as.data.frame(as.matrix(norm.expr))
 # write.table(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = "\t", )
 
 # Now plot the new annotations
 DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
-DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "case.type")
-#DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident")
+DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident") # color by sample - will show batch effects (which should be very minimal if at all)
 
 # create a barplot to show the numbers of cells in each cluster / component type
 celltype.numcells <- as.data.frame(table(hl_all.combined$celltype))
@@ -524,7 +525,7 @@ colnames(celltype.numcells) <- c("celltype", "numcells")
 p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) + 
       geom_bar(stat = "identity", width = 0.8, fill="darkblue") + 
       xlab("") + ylab("") + 
-      ylim(0,60000) +
+      ylim(0, 78000) +
       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
       theme(panel.spacing = unit(1, "lines")) + 
       geom_text(aes(label=numcells), hjust=-0.1, vjust=0.5, size=4, color="gray47")+
@@ -540,7 +541,7 @@ sample.celltype_num <- sample.celltype_num %>%
 sample.celltype_num <- as.data.frame(sample.celltype_num %>% dplyr::mutate(proportion = as.numeric(num_cells) / total_cells))
 # get order of samples by focusing only on proportion of naive B cells
 temp <- subset(sample.celltype_num, 
-               sample.celltype_num$cell_identity == "Naïve B cells")
+               sample.celltype_num$cell_identity == "B cells")
 temp <- temp[ order(temp$cell_identity, -temp$proportion) , ]
 # set the order in the full dataframe
 sample.celltype_num$sample_id <- factor(sample.celltype_num$sample_id, levels = temp$sample_id)
@@ -551,40 +552,36 @@ p <- ggplot(sample.celltype_num,
   scale_y_continuous(labels = scales::percent_format()) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
   scale_fill_manual(name = "Cell Identity",
-                    values = c("Naïve B cells" = "darkslateblue",
+                    values = c("B cells" = "darkslateblue",
                                "Helper T cells" = "slategray4",
-                               "T regs" = "hotpink3", 
-                               "Mature B cells" = "royalblue1", 
-                               "Naïve T cells" = "aquamarine3",
+                               "Treg" = "hotpink3", 
+                               "B cells, macrophages" = "royalblue1", 
+                               "Naive T cells" = "aquamarine3",
                                "CTL" = "olivedrab4",
-                               "CD8 memory"="firebrick3",
+                               "Treg proliferation"="firebrick3",
                                "GCB"="darkorange",
-                               "B and T mix (progenitor?)"="grey44",
-                               "Proliferation (?)"="mediumpurple1",
+                               "B and T mix"="grey44",
+                               "Proliferation"="mediumpurple1",
                                "NK cells"="bisque3",
-                               "pDC"="magenta3",
-                               "Macrophages"="green3",
-                               "Plasma cells"="purple")) +
+                               "Plasmacytoid DCs"="magenta3",
+                               "Macrophage"="green3",
+                               "Plasma cell"="purple")) +
 
   xlab("") +
   ylab("")
 
-# rename clusters to only contain letters (for DotPlot only)
-hl_all.combined  <- RenameIdents(hl_all.combined,
-                                  `Plasma cells` = "plasmaCells",
-                                  `Macrophages` = "macrophages",
-                                  `pDC` = "pDC",
-                                  `NK cells` = "NKcells",
-                                  `Proliferation (?)` = "proliferation",
-                                  `B and T mix (progenitor?)` = "BTMixProgenitor",
-                                  `GCB` = "GCB",
-                                  `CD8 memory` = "CD8Memory",
-                                  `CTL` = "CTL",
-                                  `Naïve T cells` = "naiveTCells",
-                                  `Mature B cells` = "matureBCells",
-                                  `T regs` = "TRegs",
-                                  `Helper T cells` = "helperTCells",
-                                  `Naïve B cells` = "naiveBCells")
+# rename clusters to only contain letters (for older versions of DotPlot)
+# hl_all.combined  <- RenameIdents(hl_all.combined,
+#                                  `B cells` = "B_cells",
+#                                  `Helper T cells`="Helper_T_cells",
+#                                  `B cells, macrophages`="B_cell_macrophages",
+#                                  `Naive T cells`="Naive_T_cells",
+#                                  `Treg proliferation`="Treg_proliferation",
+#                                  `B and T mix`="B_T_mix",
+#                                  `NK cells`="NK_cells",
+#                                  `Plasmacytoid DCs`="pDCs",
+#                                  `Plasma cell`="Plasma_cells"
+#                                  )
 
 # Plot expression of component genes for both case types, side-by-side
 
@@ -592,7 +589,7 @@ DotPlot(
     object = hl_all.combined,
     features = rev(markers.to.plot), 
     dot.scale = 8,
-    split.by = "case.type", cols = c("red", "blue"), scale = TRUE) + 
+    split.by = "case.type", cols = c("red", "blue", "orange"), scale = TRUE) + 
   RotatedAxis()
   #scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00")
 ```
@@ -605,47 +602,68 @@ library(MAST)
 library(dplyr)
 
 # change default identities to cell identities (cell types)
-Idents(hl.both.combined) <- hl.both.combined$celltype
+Idents(hl_all.combined) <- hl_all.combined$celltype
 
 ## start with one cluster to test (then do a for loop)
-naiveBcell.markers <- FindConservedMarkers(hl.both.combined, ident.1 = "Naïve B cells", grouping.var = "case.type")
+# naiveBcell.markers <- FindConservedMarkers(hl_all.combined, ident.1 = "Naïve B cells", grouping.var = "case.type")
 
 # iterate through all the cell identities
-cell.identities <- as.vector(unique(Idents(hl.both.combined)))
+cell.identities <- as.vector(unique(Idents(hl_all.combined)))
 # store the results in a vector of data frames
 # initialize empty vector of results
 markers.results <- vector('list', length(cell.identities))
 
 # Approach 1: find markers that are conserved between two groups (cell identity vs. all other identities)
 for (i in 1:length(cell.identities)) {
-  markers.results[[i]] <- FindConservedMarkers(hl.both.combined, 
+  markers.results[[i]] <- FindConservedMarkers(hl_all.combined, 
                                                ident.1 = cell.identities[i],  
                                                grouping.var = "case.type")
 }
-# Top 3 *conserved* markers for each cluster / cell type / cell identity:
-#1. Naive T cells - IL7R
-#2. Helper T cells - CXCL13
-#3. GCB - MS4A1
-#4. T regs - IL32 (LAG3, CD7 is also in the list)
-#5. Naive B cells - IGHM, IGHD, CD79A
-#6. CTL - CCL5, GZMK, GZMA, CCL4
-#7. B and T mix (progenitor?) - only 1 conserved marker: KLRB1
-#8. Mature B cells - TNFRSF13B
-#9. CD8 memory - CD8B, CD8A, CCR7
-#10. pDC - GZMB, PTGDS, CST3
-#11. Proliferation (?) - HMGB2, STMN1, MKI67
-#12. NK cells - GNLY, NKG7, KLRD1
-#13. Macrophages - CST3, LYZ, APOE
-#14. Plasma cells - IGHG1, IGHG3, IGHG2, IGHG4, IGHGP
+# Top (up to) 3 *conserved* markers for each cluster / cell type / cell identity:
+#1. Naive T cells - CCR7, IL7R
+#2. Tregs - CTLA4, IL32, TNFRSF18
+#3. Helper T cells - TRAC, CD2
+#4. Macrophages - CLEC10A, CSTA
+#5. B cells - IGHM, HLA-DRA, MS4A1, CD74
+#6. CTLs - CCL5, GZMK, NKG7
+#7. GCBs - RGS13, CCDC144A
+#8. Plasmocytoid DCs - GZMB, PTGDS
+#9. NK cells - GNLY, NKG7
+#10. B and T mix - no conserved markers
+#11. Plasma cells - DERL3
+#12. B cells, macrophages - RSAD2, IFIT3
+#13. Treg proliferation - MKI67, BIRC5
 
 # Plot top conserved marker using FeaturePlots
-top.conserved.markers <- c("IL7R", "CXCL13", "MS4A1", "IL32", "IGHM", "CCL5", "KLRB1", "TNFRSF13B", "CD8B", "GZMB", "HMGB2", "GNLY", "CST3", "IGHG1")
-FeaturePlot(hl.both.combined, features = top.conserved.markers, min.cutoff = "q9")
+top.conserved.markers <- c("DERL3", "MKI67", "BIRC5")
+FeaturePlot(hl_all.combined, features = top.conserved.markers, min.cutoff = "q9")
 
-# Approach 2: use FindAllMarkers (finds markers that are differentially expressed in each identity group compared to all others)
-markers.results2 <- FindAllMarkers(hl.both.combined, assay = "RNA", test.use = "MAST")
+# plot in groups
+# Group 1: T cells
+t.markers <- c("IL7R", "IL32", "TRAC", "CCL5")
+FeaturePlot(hl_all.combined, features = t.markers, min.cutoff = "q9")
+
+# Group 2: B cells
+b.markers <- c("MS4A1", "HLA-DRA", "IGHM", "CD74")
+FeaturePlot(hl_all.combined, features = b.markers, min.cutoff = "q9")
+
+# Group 3: all other cells
+other.markers <- c("CSTA", # macrophages
+                   "RGS13", # GCBs
+                   "PTGDS", # pDCs
+                   "GNLY", # NK cells
+                   "MKI67", # Treg proliferation
+                   "DERL3" # plasma cells
+                   )
+FeaturePlot(hl_all.combined, features = other.markers, min.cutoff = "q9")
+
+# APPROACH 2: use FindAllMarkers (finds markers that are differentially expressed in each identity group vs all others)
+
+markers.results2 <- FindAllMarkers(hl_all.combined, assay = "RNA", test.use = "MAST")
 # filter for adjusted p-value < 0.05
 markers.results2 <- filter(markers.results2, markers.results2$p_val_adj < 0.05)
+
+write.table(markers.results2, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined-all_markers.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 
 # get top 3 markers for each cluster
 markers.results2.top3 <- do.call(rbind, 
@@ -654,33 +672,17 @@ markers.results2.top1 <- do.call(rbind,
                 lapply(split(markers.results2, markers.results2$cluster), function(x) x[order(-x$avg_logFC)[1],]))
 
 # Top markers for each cluster (based on differential expression to all other clusters)
-top.conserved.markers <- c("IGHM", "CXCL13", "IL32", "TNFRSF13B", "IL7R", "CCL5", "CD8B", "BCL11A", "TNFRSF4", "STMN1", "GNLY", "GZMB", "LYZ", "IGHG1")
-FeaturePlot(hl.both.combined, features = top.conserved.markers, min.cutoff = "q9")
-
-# plot in groups
-# Group 1: T cells
-t.markers <- c("IL7R", "CXCL13", "IL32", "CCL5", "CD8B")
-FeaturePlot(hl.both.combined, features = t.markers, min.cutoff = "q9")
-
-# Group 2: B cells
-b.markers <- c("MS4A1", "BCL11A", "IGHM", "TNFRSF13B")
-FeaturePlot(hl.both.combined, features = b.markers, min.cutoff = "q9")
-
-# Group 3: all other cells
-other.markers <- c("KLRB1", "TNFRSF4", "GZMB", 
-                   "HMGB2", "STMN1", "GNLY", 
-                   "CST3", "LYZ", "IGHG1"
-                   )
-FeaturePlot(hl.both.combined, features = other.markers, min.cutoff = "q9")
+top.conserved.markers <- markers.results2.top1$gene
+FeaturePlot(hl_all.combined, features = top.conserved.markers, min.cutoff = "q9")
 
 # Visualize conserved cell type markers:
-conserved.markers <- c(t.markers, b.markers, other.markers)
-DotPlot(
-    object = hl.both.combined,
-    features = conserved.markers, 
+# conserved.markers <- c(t.markers, b.markers, other.markers)
+dp <- DotPlot(
+    object = hl_all.combined,
+    features = top.conserved.markers, 
     dot.scale = 8,
-    split.by = "case.type", cols = c("red", "blue")) + 
-  RotatedAxis() + xlab("") + ylab("")
+    split.by = "case.type", cols = c("orange", "blue", "red")) + 
+    RotatedAxis() + xlab("") + ylab("") + coord_flip()
 
 ```
 
@@ -698,21 +700,15 @@ library(MAST)
 library(DESeq2)
 library(Seurat)
 
-hl.both.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl.both.combined.3.annotated.rds")
-
-# remove LSARP-15 (outlier)
-hl.both.combined <- subset (hl.both.combined, subset = orig.ident != "cHL-LSARP-15")
-# hl.both.combined <- subset (hl.both.combined, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 20)
-
 # change default assay to RNA
-DefaultAssay(hl.both.combined) <- "RNA"
+DefaultAssay(hl_all.combined) <- "RNA"
 # normalize and scale data for DE testing
-hl.both.combined <- NormalizeData(hl.both.combined)
-hl.both.combined <- ScaleData(hl.both.combined)
+hl_all.combined <- NormalizeData(hl_all.combined)
+hl_all.combined <- ScaleData(hl_all.combined)
 
-hl.both.combined$celltype.case <- paste(Idents(hl.both.combined), hl.both.combined$case.type, sep = "_")
-hl.both.combined$celltype <- Idents(hl.both.combined) # keep a copy of the cluster annotations
-Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main identity (for DE analysis)
+hl_all.combined$celltype.case <- paste(Idents(hl_all.combined), hl_all.combined$case.type, sep = "_")
+hl_all.combined$celltype <- Idents(hl_all.combined) # keep a copy of the cluster annotations
+Idents(hl_all.combined) <- hl_all.combined$case.type # make case type the main identity (for DE analysis)
 
 ## try out all the differential expression methods:
 # de.methods <- c("wilcox", # NA's for p-values --> generic method
@@ -740,38 +736,35 @@ Idents(hl.both.combined) <- hl.both.combined$case.type # make case type the main
 ## Add labels to distinguish between early and late relapse cases
 
 ```{r}
-# read in metadata
-hl.combined.metadata <- read.table("~/Documents/sc_HL_relapse/data/library_info-primary_and_relapse_cohorts.txt", sep = "\t", header = TRUE)
-
 # map clinical information to orig.idents (*remember to map using vectors!)
 
 # pathology
-hl.both.combined$path <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Pathology)
+hl_all.combined$path <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Pathology)
 )
 # EBV status
-hl.both.combined$ebv <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$EBVStatus)
+hl_all.combined$ebv <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$EBVStatus)
 )
 # gender
-hl.both.combined$sex <- plyr::mapvalues(x = hl.both.combined$orig.ident, 
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Sex)
+hl_all.combined$sex <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Sex)
 )
 # age
-hl.both.combined$age <- plyr::mapvalues(x = hl.both.combined$orig.ident,
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Age)
+hl_all.combined$age <- plyr::mapvalues(x = hl_all.combined$orig.ident,
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Age)
 )
 # Stage
-hl.both.combined$stage <- plyr::mapvalues(x = hl.both.combined$orig.ident,
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Stage)
+hl_all.combined$stage <- plyr::mapvalues(x = hl_all.combined$orig.ident,
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Stage)
 )
 # early relapse status
-hl.both.combined$earlyRelapse <- plyr::mapvalues(x = hl.both.combined$orig.ident,
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$EarlyRelapse)
+hl_all.combined$earlyRelapse <- plyr::mapvalues(x = hl_all.combined$orig.ident,
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$EarlyRelapse)
 )
 # refractory status
-hl.both.combined$refractory <- plyr::mapvalues(x = hl.both.combined$orig.ident,
-    from = as.vector(hl.combined.metadata$Sample), to = as.vector(hl.combined.metadata$Refractory)
+hl_all.combined$refractory <- plyr::mapvalues(x = hl_all.combined$orig.ident,
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Refractory)
 )
 ```
 
