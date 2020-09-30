@@ -477,6 +477,7 @@ grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 ```{r}
 library(ggplot2)
 library(dplyr)
+library(gridExtra)
 
 # Tomo's latest mappings (as of July 21, 2020)
 hl_all.combined <- RenameIdents(hl_all.combined,
@@ -522,14 +523,31 @@ DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.
 # create a barplot to show the numbers of cells in each cluster / component type
 celltype.numcells <- as.data.frame(table(hl_all.combined$celltype))
 colnames(celltype.numcells) <- c("celltype", "numcells")
+
 p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) + 
       geom_bar(stat = "identity", width = 0.8, fill="darkblue") + 
       xlab("") + ylab("") + 
       ylim(0, 78000) +
+      theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+      theme(panel.spacing = unit(1, "lines")) +
+      theme(legend.title = element_blank()) +
+      geom_text(aes(label=numcells), hjust=0.5, vjust=-1, size=4, color="gray47")
+
+celltype.numcells2 <- as.data.frame(table(hl_all.combined$celltype, hl_all.combined$case.type))
+colnames(celltype.numcells2) <- c("celltype", "case_type", "numcells")
+
+p.log <- ggplot(celltype.numcells2, aes(x = celltype, y = numcells, fill = case_type)) + 
+      geom_bar(position = "fill", stat = "identity", width = 0.8) + 
+      scale_y_continuous(labels = scales::percent_format()) +
+      xlab("") + ylab("") + 
       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
       theme(panel.spacing = unit(1, "lines")) + 
-      geom_text(aes(label=numcells), hjust=-0.1, vjust=0.5, size=4, color="gray47")+
-      coord_flip()
+      theme(legend.title = element_blank()) +
+      theme(legend.position="bottom")
+      
+grid.arrange(p, p.log)
 
 # create a stacked barplot to show the proportion of each cell identity by sample
 sample.celltype_num <- as.data.frame(table(hl_all.combined$orig.ident, hl_all.combined$celltype))
@@ -696,7 +714,7 @@ Check out https://nbisweden.github.io/excelerate-scRNAseq/session-de/session-de-
 library(ggplot2)
 library(cowplot)
 theme_set(theme_cowplot())
-library(MAST)
+library(MAST) # required for DE analysis using MAST option in Seurat FindMarkers
 library(DESeq2)
 library(Seurat)
 
@@ -768,6 +786,9 @@ hl_all.combined$refractory <- plyr::mapvalues(x = hl_all.combined$orig.ident,
 )
 
 saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.meta_labelled.rds")
+
+# read back in as needed
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.meta_labelled.rds")
 ```
 
 ## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be tested
@@ -864,19 +885,17 @@ for (i in 1:length(de.results)) {
 ## Functions to perform DE comparisons at the cluster (cell type) level
 
 ```{r}
-library(MAST)
-
 # function to fine DE genes between all pairs
 
 get_de_genes <- function(comparators, de.test, cell_counts.df) {
-
-  NUM_CLUSTERS = length(comparators) / 2
-  
-  de_results <- vector('list', NUM_CLUSTERS)
   
   # get list of comparators that have fewer than 100 cells
   cell_counts.df <- cell_counts.df[ cell_counts.df$Var1 %in% comparators, ] # only look at comparators of interest
   low_cell_counts.comparators <- cell_counts.df[ cell_counts.df$Freq < 100, ]$Var1
+  
+  NUM_CLUSTERS = length(comparators) / 2
+  # de_results <- vector('list', NUM_CLUSTERS)
+  de_results <- list()
 
   for (i in 1:NUM_CLUSTERS) {
     index.grp1 <- (i*2)-1
@@ -886,8 +905,6 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
     if ( !(comparators[index.grp1] %in% low_cell_counts.comparators) && 
          !(comparators[index.grp2] %in% low_cell_counts.comparators)) {
       
-          testResults = 1
-      
         # slot = "data" (normalized counts)
         tempResults <- FindMarkers(hl_all.combined, 
                                    assay = "RNA", slot = "data",
@@ -896,7 +913,6 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
                                    test.use = de.test, 
                                    latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
                                    min.pct = 0.25, 
-                                   min.cells.group = 100, # minimum cells in (both? or at least one) groups
                                    logfc.threshold = 0)
         # make gene a column
         tempResults$gene <- rownames(tempResults)
@@ -912,8 +928,11 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
         tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
         # remove results that have an adjusted p-value of 1
         tempResults <- filter(tempResults, tempResults$p_val_adj < 1)
+        
+        
         # store the processed results in the final result array
-        de_results[[i]] <- tempResults
+        # de_results[[i]] <- tempResults
+        de_results[[unique(tempResults$comparison)]] <- tempResults
       }
   }
   return(de_results)
@@ -1011,10 +1030,12 @@ de.test.DESeq2 <- FindMarkers(hl.both.combined,
 # define working directory:
 work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/"
 
-# define comparators
+## ------ cell-type level -------
+
+# define comparators (for annotated cell types)
 hl_all.combined$celltype.case <- paste(hl_all.combined$celltype, hl_all.combined$case.type, sep = "_")
 Idents(hl_all.combined) <- hl_all.combined$celltype.case
-comparators <- sort(unique(hl_all.combined$celltype.case)) 
+comparators <- sort(unique(hl_all.combined$celltype.case))
 
 # remove RLN cases
 comparators <- comparators[ !grepl("_RLN", comparators)]
@@ -1022,18 +1043,37 @@ comparators <- comparators[ !grepl("_RLN", comparators)]
 cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.case))
 
 # perform DE analysis, where odd indices = diagnostic, even indices = relapse
+de.diag_vs_rel.celltypes <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
+de.diag_vs_rel.celltypes.df <- merge_de_results(de.diag_vs_rel.celltypes)
+write.table(de.diag_vs_rel.celltypes.df, 
+            paste(work.dir, "de.diag_vs_rel.cell_types.txt", sep=""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+hl_all.combined$cluster.case <- paste(hl_all.combined$seurat_clusters, hl_all.combined$case.type, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$cluster.case
+comparators <- sort(unique(hl_all.combined$cluster.case))
+
+# remove RLN cases
+comparators <- comparators[ !grepl("_RLN", comparators)]
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$cluster.case))
+
+# perform DE analysis, where odd indices = diagnostic, even indices = relapse
 de.diag_vs_rel.clusters <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
 de.diag_vs_rel.clusters.df <- merge_de_results(de.diag_vs_rel.clusters)
 write.table(de.diag_vs_rel.clusters.df, 
-            paste(work.dir, "de.diag_vs_rel.clusters.txt", sep=""), 
+            paste(work.dir, "de.diag_vs_rel.clusters.txt", sep=""),
             sep = "\t", quote = FALSE, row.names = FALSE)
-# if reading back from GSC projects space:
-de.diag_vs_rel.clusters.df <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/")
+
 ```
 
 ## Cluster-level DE analysis: diagnostic vs. refractory
 
 ```{r}
+## ------ cell-type level -------
+
 # define comparators
 hl_all.combined$celltype.refractory <- paste(hl_all.combined$celltype, hl_all.combined$refractory, sep = "_")
 Idents(hl_all.combined) <- hl_all.combined$celltype.refractory 
@@ -1045,16 +1085,37 @@ comparators <- comparators[ !grepl("_(relapseNotRefractory|NA)", comparators)]
 cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.refractory))
 
 # perform the DE analysis
+de.diag_vs_refractory.celltypes <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
+de.diag_vs_refractory.celltypes.df <- merge_de_results(de.diag_vs_refractory.celltypes)
+write.table(de.diag_vs_refractory.celltypes.df, 
+            paste(work.dir, "de.diag_vs_refractory.cell_types.txt", sep = ""), 
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+hl_all.combined$cluster.refractory <- paste(hl_all.combined$seurat_clusters, hl_all.combined$refractory, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$cluster.refractory 
+comparators <- sort(unique(hl_all.combined$cluster.refractory))
+
+# remove comparators associated "_relapseNotRefractory" and RLN (i.e. "_NA") cases
+comparators <- comparators[ !grepl("_(relapseNotRefractory|NA)", comparators)]
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$cluster.refractory))
+
+# perform the DE analysis
 de.diag_vs_refractory.clusters <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
 de.diag_vs_refractory.clusters.df <- merge_de_results(de.diag_vs_refractory.clusters)
 write.table(de.diag_vs_refractory.clusters.df, 
             paste(work.dir, "de.diag_vs_refractory.clusters.txt", sep = ""), 
             sep = "\t", quote = FALSE, row.names = FALSE)
+
 ```
 
 ## Cluster-level DE analysis: diagnostic vs. early relapse, diagnostic vs. late relapse
 
 ```{r}
+## ------ cell type level -------
+
 # define comparators
 hl_all.combined$celltype.earlyrelapse <- paste(hl_all.combined$celltype, hl_all.combined$earlyRelapse, sep = "_")
 Idents(hl_all.combined) <- hl_all.combined$celltype.earlyrelapse 
@@ -1063,7 +1124,39 @@ cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.earlyrelapse))
 
 # diagnostic vs. early relapse
 comparators <- sort(unique(hl_all.combined$celltype.earlyrelapse))
-# remove the "_lateRelapse" case
+# remove the "_lateRelapse" and RLN cases
+comparators <- comparators[ !grepl("_(lateRelapse|NA)", comparators)]
+
+# perform the DE analysis
+de.diag_vs_early_relapse.celltypes <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
+de.diag_vs_early_relapse.celltypes.df <- merge_de_results(de.diag_vs_early_relapse.celltypes)
+write.table(de.diag_vs_early_relapse.celltypes.df, 
+            paste(work.dir, "de.diag_vs_early_relapse.cell_types.txt", sep = ""), 
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+# diagnostic vs. late relapse
+comparators <- sort(unique(hl_all.combined$celltype.earlyrelapse))
+# remove the "_earlyRelapse" and RLN cases
+comparators <- comparators[ !grepl("_(earlyRelapse|NA)", comparators)]
+
+# perform the DE analysis
+de.diag_vs_late_relapse.celltypes <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
+de.diag_vs_late_relapse.celltypes.df <- merge_de_results(de.diag_vs_late_relapse.celltypes)
+write.table(de.diag_vs_late_relapse.celltypes.df, 
+            paste(work.dir, "de.diag_vs_late_relapse.cell_types.txt", sep = ""), 
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+# define comparators
+hl_all.combined$clusters.earlyrelapse <- paste(hl_all.combined$seurat_clusters, hl_all.combined$earlyRelapse, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$clusters.earlyrelapse 
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$clusters.earlyrelapse))
+
+# diagnostic vs. early relapse
+comparators <- sort(unique(hl_all.combined$clusters.earlyrelapse))
+# remove the "_lateRelapse" and RLN cases
 comparators <- comparators[ !grepl("_(lateRelapse|NA)", comparators)]
 
 # perform the DE analysis
@@ -1074,8 +1167,8 @@ write.table(de.diag_vs_early_relapse.clusters.df,
             sep = "\t", quote = FALSE, row.names = FALSE)
 
 # diagnostic vs. late relapse
-comparators <- sort(unique(hl_all.combined$celltype.earlyrelapse))
-# remove the "_earlyRelapse" case
+comparators <- sort(unique(hl_all.combined$clusters.earlyrelapse))
+# remove the "_earlyRelapse" and RLN cases
 comparators <- comparators[ !grepl("_(earlyRelapse|NA)", comparators)]
 
 # perform the DE analysis
@@ -1090,14 +1183,34 @@ write.table(de.diag_vs_late_relapse.clusters.df,
 ## Cluster-level DE analysis: refractory vs. relapse
 
 ```{r}
+## ------ cell type level -------
+
 # define comparators
-Idents(hl_all.combined) <- hl_all.combined$celltype.refractory 
+Idents(hl_all.combined) <- hl_all.combined$celltype.refractory
 comparators <- rev(sort(unique(hl_all.combined$celltype.refractory)))
 
-# remove the "_diagnostic" case
+# remove the "_diagnostic" and RLN cases
 comparators <- comparators[ !grepl("_(diagnostic|NA)", comparators)]
 # store number of cells for each comparator
-cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.earlyrelapse))
+cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.refractory))
+
+# perform the DE analysis
+de.refractory_vs_relapse.celltypes <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
+de.refractory_vs_relapse.celltypes.df <- merge_de_results(de.refractory_vs_relapse.celltypes)
+write.table(de.refractory_vs_relapse.celltypes.df, 
+            paste(work.dir, "de.refractory_vs_relapse.cell_types.txt", sep = ""), 
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+# define comparators
+Idents(hl_all.combined) <- hl_all.combined$cluster.refractory
+comparators <- rev(sort(unique(hl_all.combined$cluster.refractory)))
+
+# remove the "_diagnostic" and RLN cases
+comparators <- comparators[ !grepl("_(diagnostic|NA)", comparators)]
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$cluster.refractory))
 
 # perform the DE analysis
 de.refractory_vs_relapse.clusters <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
@@ -1111,17 +1224,41 @@ write.table(de.refractory_vs_relapse.clusters.df,
 ## Cluster-level DE analysis: early relapse vs. late relapse
 
 ```{r}
+## ------ cell type level -------
+
 # define comparators
 Idents(hl_all.combined) <- hl_all.combined$celltype.earlyrelapse 
-# early vs. late relapse
 comparators <- sort(unique(hl_all.combined$celltype.earlyrelapse))
-# remove the "_diagnostic" case
-comparators <- comparators[ !grepl("_diagnostic", comparators)]
-# perform the DE analysis
-de.early_vs_late_relapse.clusters <- get_de_genes(comparators = comparators, de.test = "MAST")
-de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relapse.clusters)
-write.table(de.early_vs_late_relapse.clusters.df, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.early_vs_late_relapse.clusters.txt", sep = "\t", quote = FALSE, row.names = FALSE)
 
+# remove the "_diagnostic" and RLN cases
+comparators <- comparators[ !grepl("_(diagnostic|NA)", comparators)]
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.earlyrelapse))
+
+# perform the DE analysis
+de.early_vs_late_relapse.celltypes <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
+de.early_vs_late_relapse.celltypes.df <- merge_de_results(de.early_vs_late_relapse.celltypes)
+write.table(de.early_vs_late_relapse.celltypes.df, 
+            paste(work.dir, "de.early_vs_late_relapse.cell_types.txt", sep = ""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+# define comparators
+Idents(hl_all.combined) <- hl_all.combined$clusters.earlyrelapse 
+comparators <- sort(unique(hl_all.combined$clusters.earlyrelapse))
+
+# remove the "_diagnostic" and RLN cases
+comparators <- comparators[ !grepl("_(diagnostic|NA)", comparators)]
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$clusters.earlyrelapse))
+
+# perform the DE analysis
+de.early_vs_late_relapse.clusters <- get_de_genes(comparators, de.test = "MAST", cell_counts.df)
+de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relapse.clusters)
+write.table(de.early_vs_late_relapse.clusters.df, 
+            paste(work.dir, "de.early_vs_late_relapse.clusters.txt", sep = ""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
 ```
 
 ## Write out subsetted expression data (maybe useful for iTALK?)
@@ -1246,21 +1383,38 @@ library(EnhancedVolcano)
 library(ggplot2)
 library(dplyr)
 library(plyr)
+library(tidyr) # separate
 
-results <- list(de.diag_vs_rel.clusters.df,
-             de.diag_vs_refractory.clusters.df,
-             de.diag_vs_early_relapse.clusters.df,
-             de.diag_vs_late_relapse.clusters.df,
-             de.refractory_vs_relapse.clusters.df,
-             de.early_vs_late_relapse.clusters.df)
+# define working directory:
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/"
 
-i <- 6
-# title <- "diagnostic vs. relapse"
+de.diag_vs_rel.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_rel.cell_types.txt", sep = ""), 
+                                         header = TRUE, sep = "\t")
+de.diag_vs_refractory.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_refractory.cell_types.txt", sep = ""), 
+                                                header = TRUE, sep = "\t")
+de.diag_vs_early_relapse.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_early_relapse.cell_types.txt", sep = ""), 
+                                                   header = TRUE, sep = "\t")
+de.diag_vs_late_relapse.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_late_relapse.cell_types.txt", sep = ""),
+                                                  header = TRUE, sep = "\t")
+de.refractory_vs_relapse.celltypes.df <- read.table(paste(work.dir, "de.refractory_vs_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+de.early_vs_late_relapse.celltypes.df <- read.table(paste(work.dir, "de.early_vs_late_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+
+results <- list(de.diag_vs_rel.celltypes.df,
+             de.diag_vs_refractory.celltypes.df,
+             de.diag_vs_early_relapse.celltypes.df,
+             de.diag_vs_late_relapse.celltypes.df,
+             de.refractory_vs_relapse.celltypes.df,
+             de.early_vs_late_relapse.celltypes.df)
+
+i <- 1
+title <- "diagnostic vs. relapse"
 # title <- "diagnostic vs. refractory"
 # title <- "diagnostic vs. early relapse"
 # title <- "diagnostic vs. late relapse"
 # title <- "refractory vs. relapse"
-title <- "early vs. late relapse"
+# title <- "early vs. late relapse"
 test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
@@ -1271,28 +1425,45 @@ test.df$group1 <- NULL
 
 # create custom key-value pairs for different cell-types
   # this can be achieved with nested ifelse statements
-keyvals.shape <- ifelse(test.df$cell_type == 'Helper T cells', 17,
-                 ifelse(test.df$cell_type == 'Naïve B cells', 15,
-                 ifelse(test.df$cell_type == 'T regs', 18,
-                 ifelse(test.df$cell_type == 'CD8 memory', 4,
-                 ifelse(test.df$cell_type == 'CTL', 3,
-                 ifelse(test.df$cell_type == 'Mature B cells', 0,
-                 ifelse(test.df$cell_type == 'Naïve T cells', 2,
-                 ifelse(test.df$cell_type == 'Proliferation (?)', 8, 
-                 ifelse(test.df$cell_type == 'Macrophages', 10, 
-                        19)))))))))
+keyvals.shape <-  ifelse(test.df$cell_type == 'B and T mix', 14,
+                  ifelse(test.df$cell_type == 'B cells', 0,
+                  ifelse(test.df$cell_type == 'B cells, macrophages', 15,
+                  ifelse(test.df$cell_type == 'CTL', 12,
+                  ifelse(test.df$cell_type == 'GCB', 3,
+                  ifelse(test.df$cell_type == 'Helper T cells', 17,       
+                  ifelse(test.df$cell_type == 'Macrophage', 10, 
+                  ifelse(test.df$cell_type == 'Naive T cells', 2,
+                  ifelse(test.df$cell_type == 'NK cells', 4,
+                  ifelse(test.df$cell_type == 'Treg', 18,
+                  ifelse(test.df$cell_type == 'Treg proliferation', 8, 
+                  19)))))))))))
 
 keyvals.shape[is.na(keyvals.shape)] <- 19
 names(keyvals.shape)[keyvals.shape == 19] <- 'other'
+names(keyvals.shape)[keyvals.shape == 14] <- 'B and T mix'
+names(keyvals.shape)[keyvals.shape == 0] <- 'B cells'
+names(keyvals.shape)[keyvals.shape == 15] <- 'B cells, macrophages'
+names(keyvals.shape)[keyvals.shape == 12] <- 'CTL'
+names(keyvals.shape)[keyvals.shape == 3] <- 'GCB'
 names(keyvals.shape)[keyvals.shape == 17] <- 'Helper T cells'
-names(keyvals.shape)[keyvals.shape == 15] <- 'Naïve B cells'
-names(keyvals.shape)[keyvals.shape == 18] <- 'T regs'
-names(keyvals.shape)[keyvals.shape == 4] <- 'CD8 memory'
-names(keyvals.shape)[keyvals.shape == 3] <- 'CTL'
-names(keyvals.shape)[keyvals.shape == 0] <- 'Mature B cells'
-names(keyvals.shape)[keyvals.shape == 2] <- 'Naïve T cells'
-names(keyvals.shape)[keyvals.shape == 8] <- 'Proliferation'
-names(keyvals.shape)[keyvals.shape == 10] <- 'Macrophages'
+names(keyvals.shape)[keyvals.shape == 10] <- 'Macrophage'
+names(keyvals.shape)[keyvals.shape == 2] <- 'Naive T cells'
+names(keyvals.shape)[keyvals.shape == 4] <- 'NK cells'
+names(keyvals.shape)[keyvals.shape == 18] <- 'Treg'
+names(keyvals.shape)[keyvals.shape == 8] <- 'Treg proliferation'
+
+LOGFC_CUTOFF = 0.25
+PVAL_CUTOFF = 0.05
+
+keyvals.colour <- ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+      ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+             ifelse((abs(test.df$avg_logFC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+        'gray32')))
+keyvals.colour[is.na(keyvals.colour)] <- 'black'
+names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
+names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
+names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
+names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
 
 ## ------ Enhanced volcano plot ------
 
@@ -1302,23 +1473,91 @@ p.e <- EnhancedVolcano(test.df,
     title = title, subtitle = "",
     x = 'avg_logFC',
     y = 'p_val_adj',
-    FCcutoff = 0.25,
-    pCutoff = 0.05,
+    FCcutoff = LOGFC_CUTOFF,
+    pCutoff = PVAL_CUTOFF,
     shapeCustom = keyvals.shape,
+    colCustom = keyvals.colour,
     legendPosition = 'right')
 
-#    xlim = c(-1.5, 2.5)
- #   )
-
-    # drawConnectors = TRUE,
-    # colConnectors = 'grey50',
-    # legendLabSize = 12,
-    # widthConnectors = 0.25
-    # )
-  
-# p.facets <- p.e + facet_grid(rows = vars(cell_type), scales = "free")
 p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
-  theme(strip.text.x = element_text(size = 14))
+  theme(strip.text.x = element_text(size = 10))
+
+```
+
+
+## EnhancedVolcano plots for clusters (no mappings)
+
+```{r}
+
+
+# define working directory:
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/"
+
+de.diag_vs_rel.clusters.df <- read.table(paste(work.dir, "de.diag_vs_rel.cell_types.txt", sep = ""), 
+                                         header = TRUE, sep = "\t")
+de.diag_vs_refractory.clusters.df <- read.table(paste(work.dir, "de.diag_vs_refractory.cell_types.txt", sep = ""), 
+                                                header = TRUE, sep = "\t")
+de.diag_vs_early_relapse.clusters.df <- read.table(paste(work.dir, "de.diag_vs_early_relapse.cell_types.txt", sep = ""), 
+                                                   header = TRUE, sep = "\t")
+de.diag_vs_late_relapse.clusters.df <- read.table(paste(work.dir, "de.diag_vs_late_relapse.cell_types.txt", sep = ""),
+                                                  header = TRUE, sep = "\t")
+de.refractory_vs_relapse.clusters.df <- read.table(paste(work.dir, "de.refractory_vs_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+de.early_vs_late_relapse.clusters.df <- read.table(paste(work.dir, "de.early_vs_late_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+
+results <- list(de.diag_vs_rel.clusters.df,
+             de.diag_vs_refractory.clusters.df,
+             de.diag_vs_early_relapse.clusters.df,
+             de.diag_vs_late_relapse.clusters.df,
+             de.refractory_vs_relapse.clusters.df,
+             de.early_vs_late_relapse.clusters.df)
+
+i <- 1
+title <- "diagnostic vs. relapse"
+# title <- "diagnostic vs. refractory"
+# title <- "diagnostic vs. early relapse"
+# title <- "diagnostic vs. late relapse"
+# title <- "refractory vs. relapse"
+# title <- "early vs. late relapse"
+test.df <- results[[i]]
+
+#split "comparison" column by "_" and take the first split element to be cell_type
+test.df <- separate(data = test.df, col = comparison, into = c("cluster", "group1"), sep = "\\_")
+test.df$group1 <- NULL
+
+LOGFC_CUTOFF = 0.25
+PVAL_CUTOFF = 0.05
+
+keyvals.colour <- ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+      ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+             ifelse((abs(test.df$avg_logFC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+        'gray32')))
+keyvals.colour[is.na(keyvals.colour)] <- 'black'
+names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
+names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
+names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
+names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
+
+## ------ Enhanced volcano plot ------
+
+# previous p-value cutoff: 10e-32; excludes CXCL10 in macrophages
+p.e <- EnhancedVolcano(test.df,
+    lab = test.df$gene,
+    title = title, subtitle = "",
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    FCcutoff = LOGFC_CUTOFF,
+    pCutoff = PVAL_CUTOFF,
+    colCustom = keyvals.colour,
+    legendPosition = 'right')
+
+p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
+  theme(strip.text.x = element_text(size = 10))
+
+```
+
+```{r}
 
 ## --- manual volcano plot using ggplot2 ---
 
