@@ -934,7 +934,7 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
         
         # !!! NB: this step will fail if tempResults is empty (e.g. all adjusted p-values are 1)
         # store the processed results in the final result array
-        if (tempResults > 0) {
+        if (nrow(tempResults) > 0) {
           de_results[[unique(tempResults$comparison)]] <- tempResults  
         }
       }
@@ -1391,6 +1391,10 @@ p.JUND.samples <- VlnPlot(hl_all.combined, features = c("JUND"),
 
 # can add boxplot on top: VlnPlot(object = seurat_mat_filtered, features = markers_filt[[i]], pt.size = 0)+geom_boxplot(width=0.1,fill="white")
 
+p.temp <- VlnPlot(hl_all.combined, features = c("JUND"),
+                         split.by = "earlyRelapse", group.by = "orig.ident",
+                         log = FALSE, pt.size = 0, ncol = 1, 
+                         assay = "RNA", slot = "data") + xlab("")
 ```
 
 ## Ridge plots
@@ -1432,49 +1436,18 @@ results <- list(de.diag_vs_rel.celltypes.df,
              de.refractory_vs_relapse.celltypes.df,
              de.early_vs_late_relapse.celltypes.df)
 
-i <- 1
-title <- "diagnostic vs. relapse"
+i <- 6
+# title <- "diagnostic vs. relapse"
 # title <- "diagnostic vs. refractory"
 # title <- "diagnostic vs. early relapse"
 # title <- "diagnostic vs. late relapse"
 # title <- "refractory vs. relapse"
-# title <- "early vs. late relapse"
+title <- "early vs. late relapse"
 test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
 test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
 test.df$group1 <- NULL
-
-# for combined volcano plot (all clusters plotted together in one plot), map shapes to cell types
-
-# create custom key-value pairs for different cell-types
-  # this can be achieved with nested ifelse statements
-keyvals.shape <-  ifelse(test.df$cell_type == 'B and T mix', 14,
-                  ifelse(test.df$cell_type == 'B cells', 0,
-                  ifelse(test.df$cell_type == 'B cells, macrophages', 15,
-                  ifelse(test.df$cell_type == 'CTL', 12,
-                  ifelse(test.df$cell_type == 'GCB', 3,
-                  ifelse(test.df$cell_type == 'Helper T cells', 17,       
-                  ifelse(test.df$cell_type == 'Macrophage', 10, 
-                  ifelse(test.df$cell_type == 'Naive T cells', 2,
-                  ifelse(test.df$cell_type == 'NK cells', 4,
-                  ifelse(test.df$cell_type == 'Treg', 18,
-                  ifelse(test.df$cell_type == 'Treg proliferation', 8, 
-                  19)))))))))))
-
-keyvals.shape[is.na(keyvals.shape)] <- 19
-names(keyvals.shape)[keyvals.shape == 19] <- 'other'
-names(keyvals.shape)[keyvals.shape == 14] <- 'B and T mix'
-names(keyvals.shape)[keyvals.shape == 0] <- 'B cells'
-names(keyvals.shape)[keyvals.shape == 15] <- 'B cells, macrophages'
-names(keyvals.shape)[keyvals.shape == 12] <- 'CTL'
-names(keyvals.shape)[keyvals.shape == 3] <- 'GCB'
-names(keyvals.shape)[keyvals.shape == 17] <- 'Helper T cells'
-names(keyvals.shape)[keyvals.shape == 10] <- 'Macrophage'
-names(keyvals.shape)[keyvals.shape == 2] <- 'Naive T cells'
-names(keyvals.shape)[keyvals.shape == 4] <- 'NK cells'
-names(keyvals.shape)[keyvals.shape == 18] <- 'Treg'
-names(keyvals.shape)[keyvals.shape == 8] <- 'Treg proliferation'
 
 LOGFC_CUTOFF = 0.25
 PVAL_CUTOFF = 0.05
@@ -1491,20 +1464,69 @@ names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
 
 ## ------ Enhanced volcano plot ------
 
-# previous p-value cutoff: 10e-32; excludes CXCL10 in macrophages
 p.e <- EnhancedVolcano(test.df,
     lab = test.df$gene,
     title = title, subtitle = "",
     x = 'avg_logFC',
-    y = 'p_val_adj',
+    y = 'p_val_adj', 
+    ylim = c(-10, 300), 
+    xlim = c(-2, 2.5),
+    captionLabSize = 0,
     FCcutoff = LOGFC_CUTOFF,
     pCutoff = PVAL_CUTOFF,
-    shapeCustom = keyvals.shape,
     colCustom = keyvals.colour,
-    legendPosition = 'right')
+    legendPosition = 'bottom')
 
-p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
+p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=5) +
   theme(strip.text.x = element_text(size = 10))
+
+# for combined volcano plot (all clusters plotted together in one plot), map shapes to cell types
+
+# create custom key-value pairs for different cell-types
+  # this can be achieved with nested ifelse statements
+# keyvals.shape <-  ifelse(test.df$cell_type == 'B and T mix', 14,
+#                   ifelse(test.df$cell_type == 'B cells', 0,
+#                   ifelse(test.df$cell_type == 'B cells, macrophages', 15,
+#                   ifelse(test.df$cell_type == 'CTL', 12,
+#                   ifelse(test.df$cell_type == 'GCB', 3,
+#                   ifelse(test.df$cell_type == 'Helper T cells', 17,       
+#                   ifelse(test.df$cell_type == 'Macrophage', 10, 
+#                   ifelse(test.df$cell_type == 'Naive T cells', 2,
+#                   ifelse(test.df$cell_type == 'NK cells', 4,
+#                   ifelse(test.df$cell_type == 'Treg', 18,
+#                   ifelse(test.df$cell_type == 'Treg proliferation', 8, 
+#                   19)))))))))))
+# 
+# keyvals.shape[is.na(keyvals.shape)] <- 19
+# names(keyvals.shape)[keyvals.shape == 19] <- 'other'
+# names(keyvals.shape)[keyvals.shape == 14] <- 'B and T mix'
+# names(keyvals.shape)[keyvals.shape == 0] <- 'B cells'
+# names(keyvals.shape)[keyvals.shape == 15] <- 'B cells, macrophages'
+# names(keyvals.shape)[keyvals.shape == 12] <- 'CTL'
+# names(keyvals.shape)[keyvals.shape == 3] <- 'GCB'
+# names(keyvals.shape)[keyvals.shape == 17] <- 'Helper T cells'
+# names(keyvals.shape)[keyvals.shape == 10] <- 'Macrophage'
+# names(keyvals.shape)[keyvals.shape == 2] <- 'Naive T cells'
+# names(keyvals.shape)[keyvals.shape == 4] <- 'NK cells'
+# names(keyvals.shape)[keyvals.shape == 18] <- 'Treg'
+# names(keyvals.shape)[keyvals.shape == 8] <- 'Treg proliferation'
+
+## ------ Enhanced volcano plot ------
+
+# previous p-value cutoff: 10e-32; excludes CXCL10 in macrophages
+# p.e <- EnhancedVolcano(test.df,
+#     lab = test.df$gene,
+#     title = title, subtitle = "",
+#     x = 'avg_logFC',
+#     y = 'p_val_adj',
+#     FCcutoff = LOGFC_CUTOFF,
+#     pCutoff = PVAL_CUTOFF,
+#     shapeCustom = keyvals.shape,
+#     colCustom = keyvals.colour,
+#     legendPosition = 'right')
+# 
+# p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
+#   theme(strip.text.x = element_text(size = 10))
 
 ```
 
@@ -1535,11 +1557,11 @@ results <- list(de.diag_vs_rel.clusters.df,
              de.refractory_vs_relapse.clusters.df,
              de.early_vs_late_relapse.clusters.df)
 
-i <- 4
-# title <- "diagnostic vs. relapse"
+i <- 1
+title <- "diagnostic vs. relapse"
 # title <- "diagnostic vs. refractory"
 # title <- "diagnostic vs. early relapse"
-title <- "diagnostic vs. late relapse"
+# title <- "diagnostic vs. late relapse"
 # title <- "refractory vs. relapse"
 # title <- "early vs. late relapse"
 test.df <- results[[i]]
@@ -1567,17 +1589,52 @@ p.e <- EnhancedVolcano(test.df,
     lab = test.df$gene,
     title = title, subtitle = "",
     x = 'avg_logFC',
-    y = 'p_val_adj',
+    y = 'p_val_adj', 
+    ylim = c(-12, 300), 
+    xlim = c(-2, 2.8),
+    captionLabSize = 0,
     FCcutoff = LOGFC_CUTOFF,
     pCutoff = PVAL_CUTOFF,
     colCustom = keyvals.colour,
     legendPosition = 'bottom')
 
-p.facets.grid <- p.e + facet_wrap(~ cluster, ncol=5) +
+p.facets.grid <- p.e + facet_wrap(~ cluster, ncol=6) +
   theme(strip.text.x = element_text(size = 10))
 
 
 ## ------ Custom Enhanced volcano plots ------
+
+## diag vs. rel, diag vs. late relapse - LAG3, PD-1 (PDCD1), PD-L1 (CD274), GZB, CD80, CD86, TIM3 (HAVCR2)
+# define different cell-types that will be shaded
+GOI <- c('LAG3', 'PDCD1', 'CD274', 'GZMB', 'CD80', 'CD86', 'HAVCR2')
+# create custom key-value pairs for different cell-types
+# this can be achieved with nested ifelse statements
+keyvals.shape <- ifelse(test.df$gene %in% GOI, 17, 1)
+keyvals.shape[is.na(keyvals.shape)] <- 1
+names(keyvals.shape)[keyvals.shape == 1] <- 'all other genes'
+names(keyvals.shape)[keyvals.shape == 17] <- 'GOI'
+
+
+p.e.0 <- EnhancedVolcano(test.df,
+    lab = test.df$gene,
+    title = title, subtitle = "",
+    selectLab = GOI,
+     colAlpha = 0.9,
+    #boxedLabels = TRUE,
+    drawConnectors = TRUE,
+    widthConnectors = 0.5,
+    pointSize = c(ifelse(test.df$gene %in% GOI, 8, 1)),
+    labSize = 5.0,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    FCcutoff = LOGFC_CUTOFF,
+    pCutoff = PVAL_CUTOFF,
+    shapeCustom = keyvals.shape,
+    colCustom = keyvals.colour, 
+    legendPosition = 'bottom') 
+
+p.facets.grid <- p.e.0 + facet_wrap(~ cluster, ncol=6) +
+  theme(strip.text.x = element_text(size = 10))
 
 ## diag vs. rel, diag vs. late relapse - CXCL10
 
