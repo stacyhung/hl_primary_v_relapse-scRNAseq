@@ -1437,12 +1437,9 @@ results <- list(de.diag_vs_rel.celltypes.df,
              de.early_vs_late_relapse.celltypes.df)
 
 i <- 6
-# title <- "diagnostic vs. relapse"
-# title <- "diagnostic vs. refractory"
-# title <- "diagnostic vs. early relapse"
-# title <- "diagnostic vs. late relapse"
-# title <- "refractory vs. relapse"
-title <- "early vs. late relapse"
+titles <- c("diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
+            "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
+title <- titles[i]
 test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
@@ -1478,6 +1475,40 @@ p.e <- EnhancedVolcano(test.df,
     legendPosition = 'bottom')
 
 p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=5) +
+  theme(strip.text.x = element_text(size = 10))
+
+
+## ------ Custom Enhanced volcano plots ------
+
+## diag vs. rel, diag vs. late relapse - LAG3, PD-1 (PDCD1), PD-L1 (CD274), GZB, CD80, CD86, TIM3 (HAVCR2)
+# define different cell-types that will be shaded
+GOI <- c('LAG3', 'PDCD1', 'CD274', 'GZMB', 'CD80', 'CD86', 'HAVCR2')
+# create custom key-value pairs for different cell-types
+# this can be achieved with nested ifelse statements
+keyvals.shape <- ifelse(test.df$gene %in% GOI, 17, 1)
+keyvals.shape[is.na(keyvals.shape)] <- 1
+names(keyvals.shape)[keyvals.shape == 1] <- 'all other genes'
+names(keyvals.shape)[keyvals.shape == 17] <- 'GOI'
+
+p.e.0 <- EnhancedVolcano(test.df,
+    lab = test.df$gene,
+    title = title, subtitle = "",
+    selectLab = GOI,
+    colAlpha = 0.9,
+    drawConnectors = TRUE,
+    widthConnectors = 0.5,
+    pointSize = c(ifelse(test.df$gene %in% GOI, 8, 1)),
+    labSize = 5.0,
+    captionLabSize = 0,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    FCcutoff = LOGFC_CUTOFF,
+    pCutoff = PVAL_CUTOFF,
+    shapeCustom = keyvals.shape,
+    colCustom = keyvals.colour, 
+    legendPosition = 'bottom') 
+
+p.facets.grid <- p.e.0 + facet_wrap(~ cell_type, ncol=5) +
   theme(strip.text.x = element_text(size = 10))
 
 # for combined volcano plot (all clusters plotted together in one plot), map shapes to cell types
@@ -1557,13 +1588,10 @@ results <- list(de.diag_vs_rel.clusters.df,
              de.refractory_vs_relapse.clusters.df,
              de.early_vs_late_relapse.clusters.df)
 
-i <- 1
-title <- "diagnostic vs. relapse"
-# title <- "diagnostic vs. refractory"
-# title <- "diagnostic vs. early relapse"
-# title <- "diagnostic vs. late relapse"
-# title <- "refractory vs. relapse"
-# title <- "early vs. late relapse"
+i <- 6
+titles <- c("diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
+            "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
+title <- titles[i]
 test.df <- results[[i]]
 
 #split "comparison" column by "_" and take the first split element to be cell_type
@@ -1619,8 +1647,8 @@ p.e.0 <- EnhancedVolcano(test.df,
     lab = test.df$gene,
     title = title, subtitle = "",
     selectLab = GOI,
-     colAlpha = 0.9,
-    #boxedLabels = TRUE,
+    colAlpha = 0.9,
+    captionLabSize = 0,
     drawConnectors = TRUE,
     widthConnectors = 0.5,
     pointSize = c(ifelse(test.df$gene %in% GOI, 8, 1)),
