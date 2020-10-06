@@ -1401,33 +1401,318 @@ p.temp <- VlnPlot(hl_all.combined, features = c("JUND"),
 
 ```{r}
 library(ggpubr)
+library(dplyr)
+library(gridExtra)
 
+#####################################################################################
+## Example (manually create violin plot for just GZMB):
+#####################################################################################
+# Step 1: Get the expression data
+data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data["GZMB",], 
+                    case = hl_all.combined$case.type, 
+                    celltype = hl_all.combined$celltype)
+
+expr.df <- data.df %>% filter(celltype == "CTL", case == "diagnostic" | case == "relapse")
+
+# Step 2: Calculate mean / median
+expr.df <- as.data.frame(expr.df %>%
+  select(expr, case, celltype) %>%
+  group_by(case) %>%
+  mutate(mean_expr = mean(expr)))
+
+# Step 3: Plot
+p <- ggplot(expr.df, aes(x = case, y = expr)) + 
+  geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+  scale_y_continuous(trans='log2') +
+  stat_compare_means(comparisons = list(c("diagnostic", "relapse")), label = "p.format") +
+  stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+  xlab("") + ylab("")
+#####################################################################################
+
+# Function: Create gradient breaks using quantiles of data
+custom_quantile <- function(x) {
+  out <- c(quantile(x, 0.1), quantile(x, 0.25), median(x), quantile(x,0.75), quantile(x, 0.9))
+  names(out) <- c("ymin", "lower", "middle", "upper", "ymax")
+  return(out)
+}
+
+# Function: Generate plots for a given set of genes looking at a specific cell type / cluster and comparison
+VP_by_gene <- function(gene_list, file_name, comp_grps, cluster_or_cell_types, width, height, isCluster, earlyRelapse){
+  
+  data.df <- NULL
+  expr.df <- NULL
+
+  plot_one_gene <- function(gene){
+    
+    # Step 1: create expr.df dataset (contains columns: expr, case, celltype/cluster, mean_expr)
+    if (isCluster) {
+      Idents(hl_all.combined) <- hl_all.combined$seurat_clusters
+      # Get the expression data
+      if (earlyRelapse) {
+        data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data[gene,], 
+                              case = hl_all.combined$earlyRelapse,
+                              cluster = hl_all.combined$seurat_clusters)
+      } else {
+        data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data[gene,], 
+                              case = hl_all.combined$case.type,
+                              cluster = hl_all.combined$seurat_clusters)
+      }
+      expr.df <- data.df %>% filter(cluster %in% cluster_or_cell_types, case %in% comp_grps[[1]])
+      
+    } else {
+      Idents(hl_all.combined) <- hl_all.combined$celltype
+      
+      # Get the expression data
+      if (earlyRelapse) {
+        data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data[gene,], 
+                              case = hl_all.combined$earlyRelapse, 
+                              celltype = hl_all.combined$celltype)
+      } else {
+        data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data[gene,], 
+                              case = hl_all.combined$case.type, 
+                              celltype = hl_all.combined$celltype)
+      }
+      expr.df <- data.df %>% filter(celltype %in% cluster_or_cell_types, case %in% comp_grps[[1]])
+    }
+
+    # Step 2: Calculate mean / median
+    expr.df <- as.data.frame(expr.df %>%
+        select(expr, case) %>%
+        group_by(case) %>%
+        mutate(mean_expr = mean(expr)))
+
+    # Step 3: Plot (note that we are using the Wilcoxon-rank-sum test (deals with smaller numbers better))
+    ggplot(expr.df, aes(x = case, y = expr)) + 
+      geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+      #scale_y_continuous(trans='log2') +
+      # Add 10% space on the y-axis above the box plots
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      stat_compare_means(comparisons = comp_grps, label = "p.format") +
+      stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.1) +
+      xlab("") + ylab("") + ggtitle(gene) +
+      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)) +
+      theme(axis.text = element_text(size = 12))
+    
+  }
+  purrr::map(gene_list, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
+  file_name <- paste(file_name, ".png", sep = "")
+  ggsave(file_name, width = width, height = height)
+}
+
+## TEST ##
+# VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_rel_TEST", 
+#          comp_grps = list(c("diagnostic", "relapse")),
+#          cluster_or_cell_types = c("CTL"), 
+#          width = 20, height = 10,
+#          isCluster = FALSE)
+
+```
+
+## Latest version of violin plots (coloured by mean value)
+
+```{r}
+# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
+VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("Plasmacytoid DCs"), 
+         width=10, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/macrophage-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("Macrophage"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("Treg"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("Helper T cells"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("CTL"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 9. NK cells: GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/NK-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("NK cells"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = FALSE)
+
+# 3. Treg cluster (cluster 4): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg_cluster4-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("4"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = FALSE)
+
+# 5. Helper T cell (cluster 1): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT_cluster1-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("1"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = FALSE)
+
+# 7. CTL (cluster 8): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL_cluster8-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("8"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = FALSE)
+
+
+# ############################
+# diagnostic VS early relapse
+# ############################
+
+# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
+VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("Plasmacytoid DCs"), 
+         width=10, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/macrophage-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("Macrophage"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("Treg"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("Helper T cells"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("CTL"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 9. NK cells: GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/NK-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("NK cells"), 
+         width=20, height=10, 
+         isCluster = FALSE, earlyRelapse = TRUE)
+
+# 3. Treg cluster (cluster 4): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg_cluster4-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("4"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = TRUE)
+
+# 5. Helper T cell (cluster 1): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT_cluster1-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("1"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = TRUE)
+
+# 7. CTL (cluster 8): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL_cluster8-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("8"), 
+         width=20, height=10, 
+         isCluster = TRUE, earlyRelapse = TRUE)
+  
+```
+
+## First version of violin plots (Seurat style) using p-values
+
+```{r}
 # ######################
 # diagnostic VS relapse
 # ######################
 
-vp_case1 <- function(gene_signature, file_name, test_sign, y_max, curr_idents, width, height){
-  plot_case1 <- function(signature){
-    VlnPlot(hl_all.combined, features = signature,
+# Function to create a grid of violin plots based on:
+#     gene_signature:   vector of genes to plot data for
+#     file_name:        absolute file path and file prefix for plot to be printed to
+#     test_sign:        vector of the two groups (or vector of pairs) to show signficance p-value for
+#     y_max:            highest y value to show
+#     curr_idents:      which cluster / cell type to retrieve expression from
+#     width:            width to print plot
+#     height:           height to print plot
+vp_case1 <- function(gene_signature, file_name, test_sign, y_max, cluster_or_cell_types, width, height){
+  plot_one_gene <- function(gene){
+    VlnPlot(hl_all.combined, features = gene,
             pt.size = 0,
-            group.by = "case.type", idents = curr_idents,
-            y.max = y_max, # add the y-axis maximum value - otherwise p-value hidden
+            group.by = "case.type", idents = cluster_or_cell_types,
+            #y.max = y_max, # add the y-axis maximum value - otherwise p-value hidden
+            log = TRUE,
             assay = "RNA", slot = "data"
-    ) + stat_compare_means(comparisons = test_sign, label = "p.format")
+    ) + 
+      stat_compare_means(comparisons = test_sign, label = "p.format") + 
+      theme(legend.position = "none") +
+      geom_bloxplot(fill="white")
   }
-  purrr::map(gene_signature, plot_case1) %>% cowplot::plot_grid(plotlist = .)
+  purrr::map(gene_signature, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
   file_name <- paste(file_name, ".png", sep = "")
   ggsave(file_name, width = width, height = height)
 }
 
 Idents(hl_all.combined) <- hl_all.combined$celltype
 
-# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
-vp_case1(gene_signature = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_rel", 
+# TEST: CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
+VP_by_gene(gene_signature = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_rel_TEST", 
          test_sign = list(c("diagnostic", "relapse")), 
          y_max = 7, 
+         c("CTL"), width=20, height=10)
+
+# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
+vp_case1(gene_signature = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_rel_v2", 
+         test_sign = list(c("diagnostic", "relapse")), 
+         y_max = 7.5, 
          c("Plasmacytoid DCs"), 10, 10)
+
+# test_sign = list(c("diagnostic", "relapse"), c("diagnostic", "RLN"), c("relapse", "RLN")), 
 
 # 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
 vp_case1(gene_signature = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
