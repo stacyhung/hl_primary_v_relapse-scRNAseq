@@ -10,43 +10,6 @@ output: html_document
 ```{r}
 library(iTALK)
 library(dplyr)
-
-comm_list <- c('growth factor','other','cytokine','checkpoint')
-cell_col <- c("B cells" = "darkslateblue",
-              "Helper T cells" = "slategray4",
-              "Treg" = "hotpink3", 
-              "B cells, macrophages" = "royalblue1", 
-              "Naive T cells" = "aquamarine3",
-              "CTL" = "olivedrab4",
-              "Treg proliferation"="firebrick3",
-              "GCB"="darkorange",
-              "B and T mix"="grey44",
-              "Proliferation"="mediumpurple1",
-              "NK cells"="bisque3",
-              "Plasmacytoid DCs"="magenta3",
-              "Macrophage"="green3",
-              "Plasma cell"="purple")
-
-# read in our expression data, filtered for macrophages and T cell clusters
-data <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.macrophage_t_cell_clusters.annotated.txt", sep="\t", header = TRUE, stringsAsFactors = FALSE)
-colnames(data)[colnames(data) == 'hl.both.combined.celltype'] <- 'cell_type'
-colnames(data)[colnames(data) == 'hl.both.combined.case.type'] <- 'diag_rel'
-colnames(data)[colnames(data) == 'hl.both.combined.earlyRelapse'] <- 'diag_early_rel'
-data$diag_early_rel <- NULL
-data$diag_rel <- NULL
-
-# filter for genes of interest:
-genes.keep <- c("CXCL10", "CXCR3", "MIF", "CXCR4", "cell_type") # missing CXCL12
-data.GOI <- data[genes.keep]
-
-```
-
-## Get top expressed genes
-
-```{r}
-# find top 50 percent highly expressed genes
-highly_exprs_genes <- rawParse(data.GOI, top_genes = 100, stats='mean')
-expr.CXC_genes <- highly_exprs_genes
 ```
 
 ## Visualization of interactions based on normalized expression (not DE)
@@ -54,6 +17,10 @@ expr.CXC_genes <- highly_exprs_genes
 ```{r}
 par(mfrow = c(1,2))
 res <- NULL
+
+# find top 50 percent highly expressed genes
+highly_exprs_genes <- rawParse(data.GOI, top_genes = 100, stats='mean')
+expr.CXC_genes <- highly_exprs_genes
 
 # NB: CXC receptor-ligand pairs only produce results for the cytokine communication type, so we don't
 #     to iterate through all the communication types (e.g. growth facter, etc.)
@@ -92,7 +59,9 @@ cell_col <- c("B cells" = "darkslateblue",
 
 # function that filters for cell type and gene and returns ligand-receptor interactions in given DE dataset
 # default is to filter for macrophage, proliferation and T cell subtypes and filter for CXC genes
-getLR <- function(de.df, gene_list, comm_type, file_name, width, height) {
+getLR <- function(de.df, gene_list, file_name_prefix, width, height) {
+  res.all <- NULL
+  
   #split "comparison" column by "_" and take the first split element to be cell_type
   de.df <- separate(data = de.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
 
@@ -106,21 +75,43 @@ getLR <- function(de.df, gene_list, comm_type, file_name, width, height) {
   cell_types.keep <- c("Macrophage", "Treg proliferation", "Helper T cells", "Treg", "CTL", "GCB", "Plasma cell", "Plasmacytoid DCs")
   de.cell_types <- subset(de.df, de.df$cell_type %in% cell_types.keep)
   
+  # get expanded list from LR DB (i.e. for list of input genes, get all matching receptors / ligands)
+  matching_receptors <- unique(LR.db[ LR.db$Ligand.ApprovedSymbol %in% gene_list , ]$Receptor.ApprovedSymbol)
+  matching_ligands <- unique(LR.db[ LR.db$Receptor.ApprovedSymbol %in% gene_list , ]$Ligand.ApprovedSymbol)
+  gene_list <- unique(c(gene_list, matching_ligands, matching_receptors))
+  
   # filter for genes of interest
   de.GOI <- de.cell_types[ de.cell_types$gene %in% gene_list , ]
   # de.GOI <- de.cell_types[grep("CXC", de.cell_types$gene), ]
   
-  # get LR pairs for comm_type of interest
-  res <- FindLR(de.GOI, datatype='DEG', comm_type = comm_type)
-  res <- res[order(abs(res$cell_from_logFC*res$cell_to_logFC), decreasing = TRUE), ]
+  # for each type of communication, plot LR results (if there is any)
+  for(comm_type in comm_list) {
+      # get LR pairs for comm_type of interest
+    res <- FindLR(de.GOI, datatype = 'DEG', comm_type = comm_type)
+    res <- res[order(abs(res$cell_from_logFC*res$cell_to_logFC), decreasing = TRUE), ]
   
-  if (nrow(res) > 0) {
+    if (nrow(res) > 0) {
+      file_name <- paste(file_name_prefix, "-",  comm_type, ".pdf", sep = "")
+      pdf(file_name, width = width, height = height)
+      LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
+      dev.off()
+    }
+    res.all <- rbind(res.all, res)
+  }
+  
+  if (nrow(res.all) > 0) {
+    file_name <- paste(file_name_prefix, "-all_comm_types", ".pdf", sep = "")
     pdf(file_name, width = width, height = height)
-    LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
+    LRPlot(res.all, datatype = 'DEG', 
+           cell_col = cell_col, 
+           link.arr.lwd = res.all$cell_from_logFC, 
+           link.arr.width = res.all$cell_to_logFC)
     dev.off()
+    
+    NetView(res.all, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
   }
 
-  return(res)
+  return(res.all)
 }
 
 ```
@@ -135,318 +126,66 @@ de.diag_v_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_a
 de.diag_v_late_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/de.diag_vs_late_relapse.cell_types.txt", sep = "\t", header = TRUE)
 
 # ##################################################
-# LR interactions for CXC components
+# LR interactions for Macrophage/pDC and Tcell genes: 
+#   T cell genes:             LAG3, Galectin3 (LGALS3), FGL-1 (FGL1), LSECtin (CLEC4G)
+#   Macrophage / pDC genes:   HLA-DP (HLA-DPA1, HLA-DPB1), HLA-DQ (HLA-DQA1, HLA-DQB1, HLA-DQB1-AS1, HLA-DQA2, HLA-DQB2), HLA-DR (HLA-DRA, HLA-DRB5, HLA-DRB1)
 # ##################################################
 
+t_cell_genes <- c("LAG3", "LGALS3", "FGL1", "CLEC4G") # no DE interactions
+macrophage_genes <- c("HLA-DPA1", "HLA-DPB1", "HLA-DQA1", "HLA-DQB1", "HLA-DQB1-AS1", "HLA-DQA2", "HLA-DQB2", "HLA-DRA", "HLA-DRB5", "HLA-DRB1")
+gene_list <- macrophage_genes
+
 # diagonstic vs. refractory
-res <- getLR(de.diag_v_refractory, gene_list = c("NA"), comm_type = "cytokine", 
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-CXC_genes.pdf", 5, 5)
+res <- getLR(de.df = de.diag_v_refractory, gene_list = gene_list,
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-m_pDC_genes", 5, 5)
 # 0 results
 
 # diagonstic vs. early relapse
-res <- getLR(de.diag_v_early_rel, gene_list = c("NA"), comm_type = "cytokine",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-CXC_genes.pdf", 5, 5)
+res <- getLR(de.df = de.diag_v_early_rel, gene_list = gene_list,
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-m_pDC_genes", 5, 5)
 
 # diagonstic vs. relapse
-res <- getLR(de.diag_v_rel, gene_list = c("NA"), comm_type = "cytokine",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-CXC_genes.pdf", 5, 5)
-#NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
+res <- getLR(de.df = de.diag_v_rel, gene_list = gene_list,
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-m_pDC_genes", 5, 5)
 
 # diagonstic vs. late relapse
-res <- getLR(de.diag_v_late_rel, gene_list = c("NA"), comm_type = "cytokine",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-CXC_genes.pdf", 5, 5)
+res <- getLR(de.df = de.diag_v_late_rel, gene_list = gene_list,
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-m_pDC_genes", 5, 5)
 #NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
 
 # ##################################################
 # LR interactions for GOI
 # ##################################################
 
-receptors <- c("PDCD1", "CXCR3", "CD28", "CTLA4", "IGF2R", "HAVCR2",
-               "SDC1", "THBD") # second line are Stacy's additions
-ligands <- c("PDCD1LG2", "CD274", "CXCL9", "CXCL10", "CD80", "GZMB", "LGALS9", "HMGB1",
-             "IL12A") # second line are Stacy's additions
-
-# Gene name for "PTSS"?
-GOI <- c(         "PDCD1", # PD-1 
-                  "CD274", # PD-L1
+# Gene name for "PTSS" (paired to TIM3)?
+GOI <- c(         "PDCD1",  # PD-1 
+                  "CD274",  # PD-L1
                   "CD80", 
                   "CD86",
                   "CD28",
                   "HAVCR2", # TIM3
                   "GZMB",
                   "IGF2R",
-                  "M6PR", # --> !! Not in iTALK LR DB
+                  "M6PR", 
                   "LGALS9", # Galectin-9
-                  "HMGB1", # matching receptors: SDC1, THBD
+                  "HMGB1",  # matching receptors (SDC1, THBD) not in this list
                   "CEACAM1",
-                  "CTLA4") 
-
-# last line of genes are just Stacy's additions to try and expand the LR pairs that are captured by the FindLR function
-
-# extract pairs in the LR database:
-temp <- LR.db[ LR.db$Ligand.ApprovedSymbol %in% GOI , ]
-temp[ , c("Pair.Name", "Ligand.ApprovedSymbol", "Receptor.ApprovedSymbol") ]
+                  "CTLA4")
 
 res <- getLR(de.diag_v_refractory, 
              gene_list = GOI, 
-             comm_type = "other",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_refractory-GOI.pdf", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_refractory-GOI", 5, 5)
 
 res <- getLR(de.diag_v_early_rel, 
              gene_list = GOI, 
-             comm_type = "other",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-GOI.pdf", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-GOI", 5, 5)
 
 res <- getLR(de.diag_v_rel, 
              gene_list = GOI, 
-             comm_type = "other",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-GOI.pdf", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-GOI", 5, 5)
 
 res <- getLR(de.diag_v_late_rel, 
              gene_list = GOI, 
-             comm_type = "other",
-             file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-GOI.pdf", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-GOI", 5, 5)
 
-```
-
-## Previous DE analyses
-
-```{r}
-# diagonstic vs. relapse
-de_results.diag_v_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_rel.clusters.txt", sep = "\t", header = TRUE)
-
-# Get ligand-receptor interactions
-gene_list <- c("CXCL9", "CXCL10", "CD274", "CD80", "HAVCR2", "PDCD1")
-comm_type <- "cytokine"
-res <- getLR(de_results.diag_v_rel, gene_list = gene_list)
-
-# Plot LR interactions
-LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
-NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-
-# diagnostic vs. early relapse
-de_results.diag_v_early_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_early_relapse.clusters.txt", sep = "\t", header = TRUE)
-res <- getLR(de_results.diag_v_early_rel)
-LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
-NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-
-# diagnostic vs. late relapse
-de_results.diag_v_late_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_late_relapse.clusters.txt", sep = "\t", header = TRUE)
-res <- getLR(de_results.diag_v_late_rel)
-LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
-NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-
-# diagnostic vs. refractory
-de_results.diag_v_ref <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/minus_LSARP-15/de.diag_vs_refractory.clusters.txt", sep = "\t", header = TRUE)
-res <- getLR(de_results.diag_v_ref)
-LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
-NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5, vertex.size = 30, margin = 0, 
-edge.curved = 0)
-
-
-```
-
-## Differential expression - approach 1: with iTALK - currently buggy
-
-```{r}
-# Find DEGenes of regulatory T cells* and macrophages between these 2 groups.
-# Here T cells refers to one of: Naive T cells, CTL, Treg, and helper T cells.
-# Important! The contrasts refers to the two different group (values) -- in our case 2 = diagnostic and 1 = relapse
-
-# make sure there is only 1 extra columns at the end: cell_type and compare_group
-data$compare_group <- data$diag_rel
-# keep for future reference:
-diag_rel.df <- data$diag_rel
-diag_early_rel.df <- data$diag_early_rel
-# remove extra columns
-data$diag_rel <- NULL
-data$diag_early_rel <- NULL
-data$barcode <- NULL
-
-# pre-filter data to avoid having to doing it on the spot for every DE analysis:
-data.CTL <- filter(data, data$cell_type == 'CTL')
-data.helperTcells <- filter(data, data$cell_type == 'Helper T cells')
-data.naiveTcells <- filter(data, data$cell_type == 'Naïve T cells')
-data.Tregs <- filter(data, data$cell_type == 'T regs')
-data.macrophage <- filter(data, data$cell_type == 'Macrophage')
-
-deg.ctl <- DEG(data.CTL, method='MAST', c('diagnostic', 'relapse'))
-deg.macrophage <- DEG(data.macrophage, method='MAST', contrast = c('diagnostic', 'relapse'))
-```
-
-## Differential expression - approach 2: from Seurat
-
-Make sure results are in data frame with columns: gene, cell_type, logFC, p.value, and q.value
-
-```{r}
-de_results.diag_v_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/de.diag_vs_rel.clusters.txt", sep = "\t", header = TRUE)
-
-keeps <- c("gene", "cell_type", "avg_logFC", "p_val", "p_val_adj")
-keeps.rename <- c("gene", "cell_type", "logFC", "p.value", "q.value")
-
-# extract results within macrophage cluster
-de_results.diag_v_rel.macrophage <- de_results.diag_v_rel[grep("Macrophages", de_results.diag_v_rel$comparison), ]
-de_results.diag_v_rel.macrophage$cell_type <- "macrophage"
-de_results.diag_v_rel.macrophage$comparison <- NULL
-de_results.diag_v_rel.macrophage$pct.1 <- NULL
-de_results.diag_v_rel.macrophage$pct.2 <- NULL
-de_results.diag_v_rel.macrophage <- de_results.diag_v_rel.macrophage[ keeps ]
-colnames(de_results.diag_v_rel.macrophage) <- keeps.rename
-
-# extract results within T-cell cluster (start with CTL)
-de_results.diag_v_rel.CTL <- de_results.diag_v_rel[grep("CTL", de_results.diag_v_rel$comparison), ]
-de_results.diag_v_rel.CTL$cell_type <- "CTL"
-de_results.diag_v_rel.CTL$comparison <- NULL
-de_results.diag_v_rel.CTL$pct.1 <- NULL
-de_results.diag_v_rel.CTL$pct.2 <- NULL
-de_results.diag_v_rel.CTL <- de_results.diag_v_rel.CTL[ keeps ]
-colnames(de_results.diag_v_rel.CTL) <- keeps.rename
-
-# extract results within T-cell cluster (Helper T cells)
-de_results.diag_v_rel.helperTCells <- de_results.diag_v_rel[grep("Helper T cells", de_results.diag_v_rel$comparison), ]
-de_results.diag_v_rel.helperTCells$cell_type <- "Helper T cells"
-de_results.diag_v_rel.helperTCells$comparison <- NULL
-de_results.diag_v_rel.helperTCells$pct.1 <- NULL
-de_results.diag_v_rel.helperTCells$pct.2 <- NULL
-de_results.diag_v_rel.helperTCells <- de_results.diag_v_rel.helperTCells[ keeps ]
-colnames(de_results.diag_v_rel.helperTCells) <- keeps.rename
-
-# extract results within T-cell cluster (Naive T cells)
-de_results.diag_v_rel.naiveTCells <- de_results.diag_v_rel[grep("Naïve T cells", de_results.diag_v_rel$comparison), ]
-de_results.diag_v_rel.naiveTCells$cell_type <- "Naïve T cells"
-de_results.diag_v_rel.naiveTCells$comparison <- NULL
-de_results.diag_v_rel.naiveTCells$pct.1 <- NULL
-de_results.diag_v_rel.naiveTCells$pct.2 <- NULL
-de_results.diag_v_rel.naiveTCells <- de_results.diag_v_rel.naiveTCells[ keeps ]
-colnames(de_results.diag_v_rel.naiveTCells) <- keeps.rename
-
-# extract results within T-cell cluster (T regs)
-de_results.diag_v_rel.TRegs <- de_results.diag_v_rel[grep("T regs", de_results.diag_v_rel$comparison), ]
-de_results.diag_v_rel.TRegs$cell_type <- "T regs"
-de_results.diag_v_rel.TRegs$comparison <- NULL
-de_results.diag_v_rel.TRegs$pct.1 <- NULL
-de_results.diag_v_rel.TRegs$pct.2 <- NULL
-de_results.diag_v_rel.TRegs <- de_results.diag_v_rel.TRegs[ keeps ]
-colnames(de_results.diag_v_rel.TRegs) <- keeps.rename
-
-
-de_results.diag_v_early_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/by_cluster/de.diag_vs_early_relapse.clusters.txt", sep = "\t", header = TRUE)
-
-keeps <- c("gene", "cell_type", "avg_logFC", "p_val", "p_val_adj")
-keeps.rename <- c("gene", "cell_type", "logFC", "p.value", "q.value")
-
-# extract results within macrophage cluster
-de_results.diag_v_early_rel.macrophage <- de_results.diag_v_early_rel[grep("Macrophages", de_results.diag_v_early_rel$comparison), ]
-de_results.diag_v_early_rel.macrophage$cell_type <- "macrophage"
-de_results.diag_v_early_rel.macrophage$comparison <- NULL
-de_results.diag_v_early_rel.macrophage$pct.1 <- NULL
-de_results.diag_v_early_rel.macrophage$pct.2 <- NULL
-de_results.diag_v_early_rel.macrophage <- de_results.diag_v_early_rel.macrophage[ keeps ]
-colnames(de_results.diag_v_early_rel.macrophage) <- keeps.rename
-
-# extract results within T-cell cluster (start with CTL)
-de_results.diag_v_early_rel.CTL <- de_results.diag_v_early_rel[grep("CTL", de_results.diag_v_early_rel$comparison), ]
-de_results.diag_v_early_rel.CTL$cell_type <- "CTL"
-de_results.diag_v_early_rel.CTL$comparison <- NULL
-de_results.diag_v_early_rel.CTL$pct.1 <- NULL
-de_results.diag_v_early_rel.CTL$pct.2 <- NULL
-de_results.diag_v_early_rel.CTL <- de_results.diag_v_early_rel.CTL[ keeps ]
-colnames(de_results.diag_v_early_rel.CTL) <- keeps.rename
-
-# extract results within T-cell cluster (Helper T cells)
-de_results.diag_v_early_rel.helperTCells <- de_results.diag_v_early_rel[grep("Helper T cells", de_results.diag_v_early_rel$comparison), ]
-de_results.diag_v_early_rel.helperTCells$cell_type <- "Helper T cells"
-de_results.diag_v_early_rel.helperTCells$comparison <- NULL
-de_results.diag_v_early_rel.helperTCells$pct.1 <- NULL
-de_results.diag_v_early_rel.helperTCells$pct.2 <- NULL
-de_results.diag_v_early_rel.helperTCells <- de_results.diag_v_early_rel.helperTCells[ keeps ]
-colnames(de_results.diag_v_early_rel.helperTCells) <- keeps.rename
-
-# extract results within T-cell cluster (Naive T cells)
-de_results.diag_v_early_rel.naiveTCells <- de_results.diag_v_early_rel[grep("Naïve T cells", de_results.diag_v_early_rel$comparison), ]
-de_results.diag_v_early_rel.naiveTCells$cell_type <- "Naïve T cells"
-de_results.diag_v_early_rel.naiveTCells$comparison <- NULL
-de_results.diag_v_early_rel.naiveTCells$pct.1 <- NULL
-de_results.diag_v_early_rel.naiveTCells$pct.2 <- NULL
-de_results.diag_v_early_rel.naiveTCells <- de_results.diag_v_early_rel.naiveTCells[ keeps ]
-colnames(de_results.diag_v_early_rel.naiveTCells) <- keeps.rename
-
-# extract results within T-cell cluster (T regs)
-de_results.diag_v_early_rel.TRegs <- de_results.diag_v_early_rel[grep("T regs", de_results.diag_v_early_rel$comparison), ]
-de_results.diag_v_early_rel.TRegs$cell_type <- "T regs"
-de_results.diag_v_early_rel.TRegs$comparison <- NULL
-de_results.diag_v_early_rel.TRegs$pct.1 <- NULL
-de_results.diag_v_early_rel.TRegs$pct.2 <- NULL
-de_results.diag_v_early_rel.TRegs <- de_results.diag_v_early_rel.TRegs[ keeps ]
-colnames(de_results.diag_v_early_rel.TRegs) <- keeps.rename
-
-```
-
-## iTALK: find significant ligand-receptor pairs and do the plotting
-
-```{r}
-par(mfrow = c(1,2)) # create two panels for plotting
-
-de_results.Tcell <- de_results.diag_v_rel.CTL
-# de_results.Tcell <- de_results.diag_v_rel.helperTCells
-# de_results.Tcell <- de_results.diag_v_rel.naiveTCells
-# de_results.Tcell <- de_results.diag_v_rel.TRegs
-
-# de_results.Tcell <- de_results.diag_v_early_rel.CTL
-# de_results.Tcell <- de_results.diag_v_early_rel.helperTCells
-# de_results.Tcell <- de_results.diag_v_early_rel.naiveTCells
-de_results.Tcell <- de_results.diag_v_early_rel.TRegs
-
-
-res <- NULL # create an empty results dataframe
-
-for(comm_type in comm_list) {
-  res_cat<-FindLR(de_results.Tcell, de_results.diag_v_early_rel.macrophage, datatype='DEG',comm_type=comm_type)
-  res<-rbind(res,res_cat)
-}
-res <- na.omit(res)
-res<-res[order(abs(res$cell_from_logFC*res$cell_to_logFC),decreasing=T),]
-
-# plots
-LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC,
-           link.arr.width = res$cell_to_logFC)
-NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-  # title(comm_type)
-```
-
-```{r}
-# !!! buggy !!!
-  
-for(comm_type in comm_list) {
-  res_cat <- FindLR(de_results.diag_v_rel.macrophage, de_results.diag_v_rel.CTL, 
-                    datatype = 'DEG', comm_type = comm_type)
-  res_cat <- res_cat[ order(res_cat$cell_from_logFC*res_cat$cell_to_logFC, decreasing = T), ]
-  
-  # plot by ligand category
-  if(nrow(res_cat) == 0) {
-    next
-  } else if(nrow(res_cat >= 20)) {
-    LRPlot(res_cat[1:20, ], datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res_cat$cell_from_logFC[1:20],
-           link.arr.width = res_cat$cell_to_logFC[1:20])
-  } else {
-    LRPlot(res_cat, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res_cat$cell_from_logFC, 
-           link.arr.width = res_cat$cell_to_logFC)
-  }
-  NetView(res_cat, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-  title(comm_type)
-  res <- rbind(res, res_cat)
-}
-
-if(is.null(res)) {
-  print('No significant pairs found')
-} else if(nrow(res) >= 20) {
-  res <- res[order(res$cell_from_logFC*res$cell_to_logFC, decreasing = T), ][1:20, ]
-  NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-  LRPlot(res[1:20, ], datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC[1:20],
-         link.arr.width = res$cell_to_logFC[1:20])
-} else {
-  NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
-  LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, 
-         link.arr.width = res$cell_to_logFC)
-}
 ```
