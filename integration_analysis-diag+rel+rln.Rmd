@@ -230,7 +230,7 @@ experiment.data <- do.call("cbind", d10x.data)
 hl_diag.merged <- CreateSeuratObject(
   experiment.data,
   project = "hl diag merged",
-  min.cells = 10, # keep all genes that are expressed in at least 3 cells --> might be too lenient for scTransform
+  min.cells = 8, # keep all genes that are expressed in at least 3 cells --> might be too lenient for scTransform
   min.features = 200, # keep all cells that are expressing at least 200 transcripts
   names.field = 2, # the sample id is in the 2nd column after applying the delimiter "_"
   names.delim = "\\_" # the delimiter
@@ -759,6 +759,10 @@ Idents(hl_all.combined) <- hl_all.combined$case.type # make case type the main i
 ```{r}
 # map clinical information to orig.idents (*remember to map using vectors!)
 
+# biology
+hl_all.combined$biology <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
+    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Biology)
+)
 # pathology
 hl_all.combined$path <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
     from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Pathology)
@@ -1267,6 +1271,31 @@ de.early_vs_late_relapse.clusters.df <- merge_de_results(de.early_vs_late_relaps
 write.table(de.early_vs_late_relapse.clusters.df, 
             paste(work.dir, "de.early_vs_late_relapse.clusters.txt", sep = ""),
             sep = "\t", quote = FALSE, row.names = FALSE)
+
+## #########################################################
+## Cluster-level DE analysis: HL (diagnostic + relapse) vs. relapse
+## #########################################################
+
+# define working directory:
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/"
+
+## ------ cell-type level -------
+
+# define comparators (for annotated cell types)
+hl_all.combined$celltype.biology <- paste(hl_all.combined$celltype, hl_all.combined$biology, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$celltype.biology
+comparators <- sort(unique(hl_all.combined$celltype.biology))
+
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.biology))
+
+# perform DE analysis, where odd indices = HL, even indices = RLN
+de.hl_vs_rln.celltypes <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
+de.hl_vs_rln.celltypes.df <- merge_de_results(de.hl_vs_rln.celltypes)
+write.table(de.hl_vs_rln.celltypes.df, 
+            paste(work.dir, "de.hl_vs_rln.cell_types.txt", sep=""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
 ```
 
 ## Write out subsetted expression data (useful for generating iTALK input?)
@@ -2006,6 +2035,97 @@ hl_all.combined <- RunPCA(hl_all.combined, features = c(s.genes, g2m.genes))
 DimPlot(hl_all.combined)
 ```
 
+## UpSet Plots
+
+```{r}
+library(UpSetR)
+library(scrattch.io)
+library(reshape2)
+library(grid)
+
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/expr/"
+print.dir <- "~/Documents/sc_HL_relapse/seurat/figures/LATEST/UpSet/"
+
+norm.expr <- GetAssayData(object = hl_all.combined[["RNA"]], slot = "data")
+
+barcodes.cluster <- as.data.frame(hl_all.combined$seurat_clusters)
+barcodes.celltype <- as.data.frame(hl_all.combined$celltype)
+barcodes.casetype <- as.data.frame(hl_all.combined$case.type)
+barcodes.earlyRelapse <- as.data.frame(hl_all.combined$earlyRelapse)
+
+cluster.to_keep <- c("20")
+celltype.to_keep <- c("Helper T cells")
+casetype.to_keep <- c("diagnostic")
+
+# Pseudocode:
+# Step 1: Extract genes of interest (should be column names)
+# Step 2: Extract barcodes of interest (e.g. diagnostic case, macrophage cluster 20) (row names)
+# Step 3: map counts / expression values to 0 or 1 (i.e. if > 0 --> 1)
+
+## ###################################################################
+## Plot 1: Diagnostic samples with macrophage (cluster 20) expression: CXCL10, CD80, CD163, PD-L1, CCL22
+## ###################################################################
+file_prefix <- "diagnostic_cluster20_genelist1.expr"
+file_name <- paste(work.dir, file_prefix, ".txt", sep = "")
+
+# 1. filter for genes
+gene_list1 <- c("CXCL10", "CD80", "CD163", "CD274", "CCL22")
+expr.genes <- norm.expr[ rownames(norm.expr) %in% gene_list1 , ]
+
+# 2. filter barcodes for cluster / cell type and case type
+barcodes.cluster_filtered <- filter(barcodes.cluster, barcodes.cluster$`hl_all.combined$seurat_clusters` %in% cluster.to_keep)
+barcodes.casetype_filtered <- filter(barcodes.casetype, barcodes.casetype$`hl_all.combined$case.type` %in% casetype.to_keep)
+barcodes.to_filter <- filter(barcodes.cluster_filtered, rownames(barcodes.cluster_filtered) %in% rownames(barcodes.casetype_filtered))
+expr.filtered <- expr.genes[, colnames(expr.genes) %in% rownames(barcodes.to_filter) ]
+write_dgCMatrix_csv(expr.filtered, file_name, col1_name = "gene", chunk_size = 1)
+expr.df <- read.table(file_name, sep = ",", header = TRUE, row.names = 1)
+expr.df.t <- as.data.frame(t(expr.df))
+expr.df.t$barcode <- rownames(expr.df.t)
+
+# 3. map expression values > 0 to 1
+expr.df.t$CXCL10[expr.df.t$CXCL10 != 0] <- 1
+expr.df.t$CD80[expr.df.t$CD80 != 0] <- 1
+expr.df.t$CD163[expr.df.t$CD163 != 0] <- 1
+expr.df.t$CD274[expr.df.t$CD274 != 0] <- 1
+expr.df.t$CCL22[expr.df.t$CCL22 != 0] <- 1
+
+pdf(paste(print.dir, file_prefix, ".pdf", sep = ""), width = 6, height = 4)
+upset(expr.df.t, sets = gene_list1, order.by = "freq", mainbar.y.label = "Number of cells") 
+dev.off()
+
+## ###################################################################
+## Plot 2: Diagnostic samples with Helper T cell (cell type) expression: CD4, PD-1 (PDCD1), LAG3, CXCL13, CD80
+## ###################################################################
+file_prefix <- "diagnostic_cluster20_genelist1.expr"
+file_name <- paste(work.dir, file_prefix, ".txt", sep = "")
+
+# 1. filter for genes
+gene_list1 <- c("CXCL10", "CD80", "CD163", "CD274", "CCL22")
+expr.genes <- norm.expr[ rownames(norm.expr) %in% gene_list1 , ]
+
+# 2. filter barcodes for cluster / cell type and case type
+barcodes.cluster_filtered <- filter(barcodes.cluster, barcodes.cluster$`hl_all.combined$seurat_clusters` %in% cluster.to_keep)
+barcodes.casetype_filtered <- filter(barcodes.casetype, barcodes.casetype$`hl_all.combined$case.type` %in% casetype.to_keep)
+barcodes.to_filter <- filter(barcodes.cluster_filtered, rownames(barcodes.cluster_filtered) %in% rownames(barcodes.casetype_filtered))
+expr.filtered <- expr.genes[, colnames(expr.genes) %in% rownames(barcodes.to_filter) ]
+write_dgCMatrix_csv(expr.filtered, file_name, col1_name = "gene", chunk_size = 1)
+expr.df <- read.table(file_name, sep = ",", header = TRUE, row.names = 1)
+expr.df.t <- as.data.frame(t(expr.df))
+expr.df.t$barcode <- rownames(expr.df.t)
+
+# 3. map expression values > 0 to 1
+expr.df.t$CXCL10[expr.df.t$CXCL10 != 0] <- 1
+expr.df.t$CD80[expr.df.t$CD80 != 0] <- 1
+expr.df.t$CD163[expr.df.t$CD163 != 0] <- 1
+expr.df.t$CD274[expr.df.t$CD274 != 0] <- 1
+expr.df.t$CCL22[expr.df.t$CCL22 != 0] <- 1
+
+pdf(paste(print.dir, file_prefix, ".pdf", sep = ""), width = 6, height = 4)
+upset(expr.df.t, sets = gene_list1, order.by = "freq", mainbar.y.label = "Number of cells") 
+dev.off()
+
+
+```
 
 ## Special request from Richard Corbett - what are the cell types for each barcode?
 
