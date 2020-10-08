@@ -40,6 +40,9 @@ LRPlot(res_cat, datatype = 'mean count', cell_col = cell_col,
 library(tidyr)
 
 LR.db <- iTALK:::database # database of LR interactions --> uses Ligand.ApprovedSymbol and Receptor.ApprovedSymbol
+# read in additional interactions
+LR.db.to_add <- read.table("~/Documents/sc_HL_relapse/iTALK/LR_database_additions_v2.txt", sep = "\t", header = TRUE)
+LR.db <- rbind(LR.db, LR.db.to_add)
 
 comm_list <- c('growth factor','other','cytokine','checkpoint')
 cell_col <- c("B cells" = "darkslateblue",
@@ -87,15 +90,20 @@ getLR <- function(de.df, gene_list, file_name_prefix, width, height) {
   # for each type of communication, plot LR results (if there is any)
   for(comm_type in comm_list) {
       # get LR pairs for comm_type of interest
-    res <- FindLR(de.GOI, datatype = 'DEG', comm_type = comm_type)
+    res <- FindLR(de.GOI, datatype = 'DEG', comm_type = comm_type, database = LR.db)
+    # res <- FindLR(de.GOI, datatype = 'DEG', comm_type = comm_type)
     res <- res[order(abs(res$cell_from_logFC*res$cell_to_logFC), decreasing = TRUE), ]
   
-    if (nrow(res) > 0) {
-      file_name <- paste(file_name_prefix, "-",  comm_type, ".pdf", sep = "")
-      pdf(file_name, width = width, height = height)
-      LRPlot(res, datatype = 'DEG', cell_col = cell_col, link.arr.lwd = res$cell_from_logFC, link.arr.width = res$cell_to_logFC)
-      dev.off()
-    }
+    # if (nrow(res) > 0) {
+    #   file_name <- paste(file_name_prefix, "-",  comm_type, ".pdf", sep = "")
+    #   pdf(file_name, width = width, height = height)
+    #   
+    #   LRPlot(res, datatype = 'DEG', cell_col = cell_col, 
+    #          link.arr.lwd = res$cell_from_logFC, 
+    #          link.arr.width = res$cell_to_logFC)
+    # 
+    #   dev.off()
+    # }
     res.all <- rbind(res.all, res)
   }
   
@@ -124,6 +132,7 @@ de.diag_v_refractory <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATE
 de.diag_v_early_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/de.diag_vs_early_relapse.cell_types.txt", sep = "\t", header = TRUE)
 de.diag_v_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/de.diag_vs_rel.cell_types.txt", sep = "\t", header = TRUE)
 de.diag_v_late_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/de.diag_vs_late_relapse.cell_types.txt", sep = "\t", header = TRUE)
+de.hl_vs_rln <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/de.hl_vs_rln.cell_types.txt", sep = "\t", header = TRUE)
 
 # ##################################################
 # LR interactions for Macrophage/pDC and Tcell genes: 
@@ -131,61 +140,80 @@ de.diag_v_late_rel <- read.table("~/Documents/sc_HL_relapse/seurat/output/LATEST
 #   Macrophage / pDC genes:   HLA-DP (HLA-DPA1, HLA-DPB1), HLA-DQ (HLA-DQA1, HLA-DQB1, HLA-DQB1-AS1, HLA-DQA2, HLA-DQB2), HLA-DR (HLA-DRA, HLA-DRB5, HLA-DRB1)
 # ##################################################
 
-t_cell_genes <- c("LAG3", "LGALS3", "FGL1", "CLEC4G") # no DE interactions
-macrophage_genes <- c("HLA-DPA1", "HLA-DPB1", "HLA-DQA1", "HLA-DQB1", "HLA-DQB1-AS1", "HLA-DQA2", "HLA-DQB2", "HLA-DRA", "HLA-DRB5", "HLA-DRB1")
-gene_list <- macrophage_genes
+gene_list <- c("HLA-DPA1", "HLA-DPB1", "HLA-DQA1", "HLA-DQB1", "HLA-DQB1-AS1", "HLA-DQA2", "HLA-DQB2", "HLA-DRA", "HLA-DRB5", "HLA-DRB1")
 
 # diagonstic vs. refractory
 res <- getLR(de.df = de.diag_v_refractory, gene_list = gene_list,
-             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-m_pDC_genes", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-mhcII_genes", 5, 5)
 # 0 results
 
 # diagonstic vs. early relapse
 res <- getLR(de.df = de.diag_v_early_rel, gene_list = gene_list,
-             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-m_pDC_genes", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-mhcII_genes", 5, 5)
 
 # diagonstic vs. relapse
 res <- getLR(de.df = de.diag_v_rel, gene_list = gene_list,
-             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-m_pDC_genes", 5, 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-mhcII_genes", 5, 5)
 
 # diagonstic vs. late relapse
 res <- getLR(de.df = de.diag_v_late_rel, gene_list = gene_list,
-             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-m_pDC_genes", 5, 5)
-#NetView(res, col = cell_col, vertex.label.cex = 1, arrow.width = 1, edge.max.width = 5)
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-mhcII_genes", 5, 5)
+
+# HL vs. RLN
+res <- getLR(de.df = de.hl_vs_rln, gene_list = gene_list,
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-hl_vs_rln-mhcII_genes", 5, 5)
+
+# ##################################################
+# LR interactions for CXC genes
+# ##################################################
+
+GOI <- c("CXCR3", "CXCL12", "CXCL13")
+
+res <- getLR(de.df = de.diag_v_refractory, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_refractory-CXC_genes", 5, 5)
+
+res <- getLR(de.df = de.diag_v_early_rel, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-CXC_genes", 5, 5)
+
+res <- getLR(de.df = de.diag_v_rel, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-CXC_genes", 5, 5)
+
+res <- getLR(de.df = de.diag_v_late_rel, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-CXC_genes", 5, 5)
+
+res <- getLR(de.df = de.hl_vs_rln, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-hl_vs_rln-CXC_genes", 5, 5)
+
 
 # ##################################################
 # LR interactions for GOI
 # ##################################################
 
-# Gene name for "PTSS" (paired to TIM3)?
-GOI <- c(         "PDCD1",  # PD-1 
-                  "CD274",  # PD-L1
-                  "CD80", 
-                  "CD86",
-                  "CD28",
-                  "HAVCR2", # TIM3
-                  "GZMB",
-                  "IGF2R",
-                  "M6PR", 
-                  "LGALS9", # Galectin-9
-                  "HMGB1",  # matching receptors (SDC1, THBD) not in this list
-                  "CEACAM1",
-                  "CTLA4")
+GOI <- c("CD80", "CD86", "CD274", "CD80", "CD86", "IGF2R", "M6PR", "FGL1", "CLEC4G", "LGALS3", "CD274", "PDCD1LG2", "LGALS9", "HMGB1", "CEACAM1", "PTDSS1")
 
-res <- getLR(de.diag_v_refractory, 
+res <- getLR(de.df = de.diag_v_refractory, 
              gene_list = GOI, 
              file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_refractory-GOI", 5, 5)
 
-res <- getLR(de.diag_v_early_rel, 
+res <- getLR(de.df = de.diag_v_early_rel, 
              gene_list = GOI, 
              file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_early_rel-GOI", 5, 5)
 
-res <- getLR(de.diag_v_rel, 
+res <- getLR(de.df = de.diag_v_rel, 
              gene_list = GOI, 
              file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_rel-GOI", 5, 5)
 
-res <- getLR(de.diag_v_late_rel, 
+res <- getLR(de.df = de.diag_v_late_rel, 
              gene_list = GOI, 
              file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-diag_vs_late_rel-GOI", 5, 5)
+
+res <- getLR(de.df = de.hl_vs_rln, 
+             gene_list = GOI, 
+             file_name_prefix = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/iTALK/LRPlot-hl_vs_rln-GOI", 5, 5)
 
 ```
