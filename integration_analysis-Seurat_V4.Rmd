@@ -244,7 +244,7 @@ experiment.data <- do.call("cbind", d10x.data)
 hl_diag.merged <- CreateSeuratObject(
   experiment.data,
   project = "hl diag merged",
-  min.cells = 8, # keep all genes that are expressed in at least 3 cells --> might be too lenient for scTransform
+  min.cells = 10, # keep all genes that are expressed in at least 3 cells --> might be too lenient for scTransform
   min.features = 200, # keep all cells that are expressing at least 200 transcripts
   names.field = 2, # the sample id is in the 2nd column after applying the delimiter "_"
   names.delim = "\\_" # the delimiter
@@ -342,44 +342,118 @@ hl_all.anchors <- FindIntegrationAnchors(object.list = hl_all.split,
 
 # !!!!! NEW !!!! You can specify the order of integration with the sample.tree parameter
 hl_all.combined <- IntegrateData(anchorset = hl_all.anchors, normalization.method = "SCT")
-# check order of integration
+# check order of integration - these don't work
 Tool(object = hl_all.combined, slot = "Integration")@sample.tree
+hl_all.combined@tools$Integration@sample.tree
+```
+
+## double check that sample.tree is null using pbmc_small from SeuratData
+
+```{r}
+InstallData("panc8")
+data("panc8")
+
+pbmc.list <- SplitObject(panc8, split.by = "tech")
+
+pbmc.list <- lapply(X = pbmc.list, FUN = function(x) {
+  x <- SCTransform(x)
+})
+
+pbmc.features <- SelectIntegrationFeatures(object.list = pbmc.list, nfeatures = 3000)
+pbmc.list <- PrepSCTIntegration(object.list = pbmc.list, anchor.features = pbmc.features)
+# largest dataset belongs to "smartseq2" which is dataset 3
+pbmc.anchors <- FindIntegrationAnchors(object.list = pbmc.list, 
+                                         anchor.features = pbmc.features, 
+                                         reference = c(3),
+                                         normalization.method = "SCT")
+pbmc.combined <- IntegrateData(anchorset = pbmc.anchors, normalization.method = "SCT")
+
+# check order of integration
+Tool(object = pbmc.combined, slot = "Integration")@sample.tree
+pbmc.combined@tools$Integration@sample.tree
+
+## Code by Seurat Lab used to check sample.tree (only works when no reference is used)
+
+library(Seurat)
+library(SeuratData)
+
+data("panc8")
+
+obj.list <- SplitObject(panc8, 'tech')
+obj.list <- obj.list[1:2]
+obj.list <- sapply(obj.list, SCTransform)
+features <- SelectIntegrationFeatures(obj.list)
+obj.list <- PrepSCTIntegration(obj.list, anchor.features = features)
+anchors <- FindIntegrationAnchors(obj.list, anchor.features = features, reference = c(1), normalization.method = "SCT")
+integrated <- IntegrateData(anchors)
+integrated@tools$Integration@sample.tree
 ```
 
 ## Perform integrated analysis
 
 ```{r}
+library(gridExtra)
+library(ggplot2)
+
 # read back in from the GSC
-hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.sctransform.rds")
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.combined.sctransform.rds")
 
 # run the standard workflow for visualization and clustering
-hl_all.combined <- ScaleData(hl_all.combined)
-hl_all.combined <- RunPCA(hl_all.combined, npcs = 30)
+# hl_all.combined <- ScaleData(hl_all.combined) # this step is not recommended when using scTransform
+hl_all.combined <- RunPCA(hl_all.combined)
+# get an idea of how many PCs to use --> not a sharp elbow, but should keep at least 20
+ElbowPlot(hl_all.combined, ndims = 50)
 
 # UMAP and clustering
-hl_all.combined <- RunUMAP(hl_all.combined, reduction = "pca", dims = 1:20)
-hl_all.combined <- FindNeighbors(hl_all.combined, reduction = "pca", dims = 1:20)
-hl_all.combined <- FindClusters(hl_all.combined, resolution = 0.5)
+hl_all.combined <- RunUMAP(hl_all.combined, reduction = "pca", dims = 1:30)
 
-saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.integrated.clustered.rds")
-hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.integrated.clustered.rds")
+# see how well the integration went
+plots <- DimPlot(hl_all.combined, group.by = c("batch", "chemistry"))
+plots & theme(legend.position = "top") & guides(color = guide_legend(nrow = 4, byrow = TRUE, 
+    override.aes = list(size = 2.5)))
+
+# normalize data for visualization purposes
+DefaultAssay(hl_all.combined) <- "RNA"
+hl_all.combined <- NormalizeData(hl_all.combined)
+
+# check if JUND is still different between chemistries
+p <- VlnPlot(hl_all.combined, features = c("JUND"), 
+        split.by = "case.type", 
+        pt.size = 0, ncol = 1, log = FALSE, sort = "increasing", 
+        assay = "RNA", slot = "data") + xlab("")
+
+p2 <- VlnPlot(hl_all.combined, features = c("JUND"), 
+        split.by = "case.type", 
+        pt.size = 0, ncol = 1, log = FALSE, sort = "increasing", 
+        assay = "integrated", slot = "data") + xlab("")
+
+DefaultAssay(hl_all.combined) <- "integrated"
+hl_all.combined <- FindNeighbors(hl_all.combined, reduction = "pca", dims = 1:30)
+hl_all.combined <- FindClusters(hl_all.combined, resolution = 0.5)
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.clustered.rds")
+#hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.integrated.clustered.rds")
 
 # Visualization
-# scale_fill_manual(values=c("cornflowerblue", "lightcoral", "gray40")) +
+
+# split by cohort (diag vs. relapse vs. RLN)
 p1 <- DimPlot(hl_all.combined, 
               reduction = "umap", 
               cols = c("relapse"="lightcoral", 
                        "diagnostic"="cornflowerblue",
                        "RLN"="gray40"),
-              group.by = "case.type") # split by cohort (diag vs. relapse)
-p2 <- DimPlot(hl_all.combined, reduction = "umap", label = TRUE) # split by cluster
+              group.by = "case.type")
+
+# split by cluster
+p2 <- DimPlot(hl_all.combined, reduction = "umap", label = TRUE) 
+
+grid.arrange(p1, p2, ncol=2)
 
 # Visualize diagnostic and relapse cases separately
 p3 <- DimPlot(hl_all.combined, reduction = "umap", split.by = "case.type")
 
 # get list of highly-variable genes
 hl.all.hvg <- hl_all.combined@assays$integrated@var.features
-write.table(hl.all.hvg, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl.integrated.hgv.txt", sep = "\t", quote = FALSE)
+write.table(hl.all.hvg, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.hgv.txt", sep = "\t", quote = FALSE)
 
 # Examine expression of component marker genes (n=47+) to help annotate clusters
 # extract markers of interest
@@ -428,6 +502,9 @@ markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4",
                      "FOXP3", "IKZF2", "IL2RA" # T reg
                      )
 
+# only look at markers that are in the HVG list
+markers.to.plot <- subset(hl.all.hvg, hl.all.hvg %in% markers.to.plot)
+
 cluster.averages <- AverageExpression(hl_all.combined, 
                                       features = markers.to.plot,
                                       return.seurat = TRUE)
@@ -441,6 +518,8 @@ hl.integrated.components.cluster.avgs <- hl.integrated.cluster.avgs[ rownames(hl
 
 # create heatmap split by component
 component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions_v2.txt", sep = "\t", header = TRUE, fill = TRUE)
+# remove genes that are not part of HVG list (IL4, IDO1, SDC1, NRP1)
+component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
 rownames(component.mappings) <- component.mappings$Gene
 components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
 component.mappings$Gene <- NULL
@@ -450,11 +529,19 @@ component.mappings$Alt_name <- NULL
 hl.integrated.components.cluster.avgs.ordered <- hl.integrated.components.cluster.avgs[ match(rownames(components.ordered), rownames(hl.integrated.components.cluster.avgs)), ]
 
 p4 <- pheatmap(hl.integrated.components.cluster.avgs.ordered, 
-         annotation_row = component.mappings, 
+         annotation_row = component.mappings,
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(10,15,18,21,26,29,32,33,34,36,37,40,46,48), border_color = NA)
+         gaps_row = c(10,15,17,20,25,27,30,31,32,33,36,42,44), border_color = NA)
+
+p4.rotated <- pheatmap(t(hl.integrated.components.cluster.avgs.ordered), 
+         annotation_col = component.mappings,
+         cluster_cols = FALSE, 
+         annotation_names_col = FALSE, 
+         gaps_col = c(10,15,17,20,25,27,30,31,32,33,36,42,44), 
+         angle_col = 45, 
+         border_color = NA)
 
 ```
 
@@ -463,7 +550,7 @@ p4 <- pheatmap(hl.integrated.components.cluster.avgs.ordered,
 ```{r}
 library(gridExtra)
 
-NUM_CLUSTERS = 24
+NUM_CLUSTERS = 23
 
 # hl.integrated.scaled <- hl_all.combined@assays$integrated@scale.data
 hl.integrated.data <- hl_all.combined@assays$integrated@data
