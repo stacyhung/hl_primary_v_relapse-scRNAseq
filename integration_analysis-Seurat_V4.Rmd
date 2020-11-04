@@ -485,7 +485,7 @@ library(pheatmap)
 library(dplyr)
 
 # component markers that are in list of HVG:
-markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHGP", "IGHM", "MS4A1", # B cell
+markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHGP", "IGHM", "MS4A1", "CD38", # B cell
                      "CD28", "CD40LG", "ICOS", "TNFRSF18", "TNFRSF8", # Co-stimulatory molecule
                      "IFNG", "IL2", "IL4", # Cytokine / chemokine
                      "GZMA", "GZMB", "GZMK", # Effector molecule
@@ -497,7 +497,7 @@ markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4",
                      "CLEC4C", "NRP1", # Plasmacytoid DC
                      "MKI67", # Proliferation
                      "CD3D", "CD4", "CD8B", # T cell
-                     "BCL6", "CCR4", "CXCL13", "GATA3", "KLRB1", "TBX21", # T helper
+                     "BCL6", "CCR4", "CXCL13", "GATA3", "KLRB1", "TBX21", "CXCR5", # T helper
                      "EOMES", "ID2", # TF
                      "FOXP3", "IKZF2", "IL2RA" # T reg
                      )
@@ -521,6 +521,7 @@ component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes
 # remove genes that are not part of HVG list (IL4, IDO1, SDC1, NRP1)
 component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
 rownames(component.mappings) <- component.mappings$Gene
+# order by component then gene name so that the heatmap legend makes sense
 components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
 component.mappings$Gene <- NULL
 component.mappings$Alt_name <- NULL
@@ -553,7 +554,8 @@ library(gridExtra)
 NUM_CLUSTERS = 23
 
 # hl.integrated.scaled <- hl_all.combined@assays$integrated@scale.data
-hl.integrated.data <- hl_all.combined@assays$integrated@data
+# hl.integrated.data <- hl_all.combined@assays$integrated@data
+hl.integrated.data <- hl_all.combined@assays$SCT@data
 # this is a 1559 (features) X 76607 (barcodes) matrix
 
 # retrieve expression for each cell across the component genes of interest
@@ -561,6 +563,8 @@ hl.integrated.markers <- hl.integrated.data[ rownames(hl.integrated.data) %in% m
 
 # create heatmap split by component
 component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions_v2.txt", sep = "\t", header = TRUE, fill = TRUE)
+# remove genes that are not part of HVG list (IL4, IDO1, SDC1, NRP1)
+component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
 # order by component then gene name so that the heatmap legend makes sense
 rownames(component.mappings) <- component.mappings$Gene
 components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
@@ -574,7 +578,7 @@ hl.integrated.markers.ordered <- hl.integrated.markers[ row.names(components.ord
 hl_integrated.clusters <- hl_all.combined$seurat_clusters
 # convert to char
 clusters.char <- levels(hl_integrated.clusters)[hl_integrated.clusters] # ordered vector of cluster ids (0 through 26)
-# barcodes.cluster <- attributes(hl_integrated.clusters)$names # ordered vector of barcodes (76,607 unique entries)
+barcodes.cluster <- attributes(hl_integrated.clusters)$names # ordered vector of barcodes (76,607 unique entries)
 clusters.df <- data.frame(barcodes.cluster, clusters.char)
 
 # extract barcodes corresponding to clusters (an array of vectors?)
@@ -585,19 +589,18 @@ heatmaps <- vector('list', NUM_CLUSTERS)
 hl.seurat <- vector('list', NUM_CLUSTERS)
 
 for (c in 1:NUM_CLUSTERS) {
-  # scale by cluster and component genes
-  hl.seurat[[c]] <- subset(hl_all.combined, idents = c-1, )
-  hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot )
-  # hl.seurat[[c]] <- ScaleData(hl.seurat[[c]])
+  hl.seurat[[c]] <- subset(hl_all.combined, idents = c-1) # filter by cluster
+  hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot) # filter by genes
   
   # retrieve expression for each cell across the component genes of interest
-  expr.temp <- hl.seurat[[c]]@assays$integrated@scale.data
+  # expr.temp <- hl.seurat[[c]]@assays$integrated@scale.data
+  expr.temp <- hl.seurat[[c]]@assays$SCT@data
   expr.markers[[c]] <- expr.temp[ rownames(expr.temp) %in% markers.to.plot , ]
   
   # reorder expression matrix to match component mappings
   expr.markers[[c]] <- expr.markers[[c]][ row.names(components.ordered), ]
 
-  filename <- paste("~/Documents/sc_HL_relapse/seurat/figures/LATEST/heatmaps/scaled/heatmap-scaled-cluster", 
+  filename <- paste("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/heatmaps/sctransform/heatmap-sctransform-cluster", 
                     c-1, ".pdf", sep = "")
   pdf(filename, width = 8, height = 8)
   heatmaps[[c]] <- pheatmap(expr.markers[[c]], 
@@ -605,14 +608,14 @@ for (c in 1:NUM_CLUSTERS) {
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(10,15,18,21,26,29,32,33,34,36,37,40,46,48), 
+         gaps_row = c(11,16,18,21,26,28,31,32,33,34,37,44,46,49), 
          border_color = NA, show_colnames = FALSE, scale = "none")
   dev.off()
 }
 
 # plot all 22 heatmaps
 #grid.arrange(grobs = heatmaps, ncol=3)
-grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
+# grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 ```
 
 ## Rename clusters based on feature plots
