@@ -627,44 +627,34 @@ library(gridExtra)
 
 # Tomo's latest mappings (as of July 21, 2020)
 hl_all.combined <- RenameIdents(hl_all.combined,
-                                `0` = "B cells",
-                                `1` = "Helper T cells",
-                                `2` = "B cells",
-                                `3` = "Naive T cells",
-                                `4` = "Treg",
-                                `5` = "Helper T cells",
-                                `6` = "B cells",
-                                `7` = "B cells",
+                                `0` = "Naive B cell",
+                                `1` = "Naive T cell",
+                                `2` = "Naive T cell",
+                                `3` = "Naive B cell",
+                                `4` = "Naive T cell",
+                                `5` = "Naive B cell",
+                                `6` = "T helper",
+                                `7` = "T-reg",
                                 `8` = "CTL",
-                                `9` = "B cells",
-                                `10` = "Helper T cells",
-                                `11` = "Treg",
-                                `12` = "Naive T cells",
-                                `13` = "Naive T cells",
-                                `14` = "B cells",
-                                `15` = "NK cells",
-                                `16` = "B and T mix",
-                                `17` = "Treg proliferation",
-                                `18` = "GCB",
-                                `19` = "Plasma cell",
-                                `20` = "Macrophage",
-                                `21` = "Plasmacytoid DCs",
-                                `22` = "B cells, macrophages",
-                                `23` = "CTL")
+                                `9` = "T helper",
+                                `10` = "B cell",
+                                `11` = "Naive B cell",
+                                `12` = "Naive CD8 cell",
+                                `13` = "B cell",
+                                `14` = "Naive B cell",
+                                `15` = "T-reg",
+                                `16` = "GCB and T cell proliferation",
+                                `17` = "Naive CD8 cell",
+                                `18` = "NK cell",
+                                `19` = "Naive B cell",
+                                `20` = "Plasma cell",
+                                `21` = "pDC",
+                                `22` = "macrophage")
 hl_all.combined$celltype <- Idents(hl_all.combined)
-saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.rds")
-
-# output normalized expression values for differential expression analysis:
-norm.expr <- GetAssayData(object = hl_all.combined[["RNA"]], slot = "data")
-
-# using package scrattch.io
-# write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
-# norm.expr.df <- as.data.frame(as.matrix(norm.expr))
-# write.table(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = "\t", )
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.annotated.rds")
 
 # Now plot the new annotations
 DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
-DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2, group.by = "orig.ident") # color by sample - will show batch effects (which should be very minimal if at all)
 
 # create a barplot to show the numbers of cells in each cluster / component type
 celltype.numcells <- as.data.frame(table(hl_all.combined$celltype))
@@ -705,7 +695,7 @@ sample.celltype_num <- sample.celltype_num %>%
 sample.celltype_num <- as.data.frame(sample.celltype_num %>% dplyr::mutate(proportion = as.numeric(num_cells) / total_cells))
 # get order of samples by focusing only on proportion of naive B cells
 temp <- subset(sample.celltype_num, 
-               sample.celltype_num$cell_identity == "B cells")
+               sample.celltype_num$cell_identity == "Naive B cell")
 temp <- temp[ order(temp$cell_identity, -temp$proportion) , ]
 # set the order in the full dataframe
 sample.celltype_num$sample_id <- factor(sample.celltype_num$sample_id, levels = temp$sample_id)
@@ -716,20 +706,19 @@ p <- ggplot(sample.celltype_num,
   scale_y_continuous(labels = scales::percent_format()) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5)) +
   scale_fill_manual(name = "Cell Identity",
-                    values = c("B cells" = "darkslateblue",
-                               "Helper T cells" = "slategray4",
-                               "Treg" = "hotpink3", 
-                               "B cells, macrophages" = "royalblue1", 
-                               "Naive T cells" = "aquamarine3",
+                    values = c("Naive B cell" = "darkslateblue",
+                               "Naive T cell" = "slategray4",
+                               "T helper" = "aquamarine3",
+                               "T-reg" = "hotpink3", 
                                "CTL" = "olivedrab4",
-                               "Treg proliferation"="firebrick3",
-                               "GCB"="darkorange",
-                               "B and T mix"="grey44",
-                               "Proliferation"="mediumpurple1",
-                               "NK cells"="bisque3",
-                               "Plasmacytoid DCs"="magenta3",
-                               "Macrophage"="green3",
-                               "Plasma cell"="purple")) +
+                               "B cell"="bisque3",
+                               "Naive CD8 cell"="royalblue1",
+                               "GCB and T cell proliferation"="firebrick3",
+                               "NK cell"="darkorange",
+                               "Plasma cell"="mediumpurple1",
+                               "pDC"="green3",
+                               "macrophage"="magenta3"
+                               )) +
 
   xlab("") +
   ylab("")
@@ -756,6 +745,15 @@ DotPlot(
     split.by = "case.type", cols = c("red", "blue", "orange"), scale = TRUE) + 
   RotatedAxis()
   #scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00")
+
+# output normalized expression values for differential expression analysis:
+norm.expr <- GetAssayData(object = hl_all.combined[["RNA"]], slot = "data")
+
+# using package scrattch.io
+# write_dgCMatrix_csv(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.norm_expr.txt", col1_name = "gene", chunk_size = 500)
+# norm.expr.df <- as.data.frame(as.matrix(norm.expr))
+# write.table(norm.expr, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.txt", sep = "\t", )
+
 ```
 
 ## Find conserved markers (to help refine cluster annotations)
@@ -902,43 +900,46 @@ Idents(hl_all.combined) <- hl_all.combined$case.type # make case type the main i
 ```{r}
 # map clinical information to orig.idents (*remember to map using vectors!)
 
-# biology
-hl_all.combined$biology <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Biology)
-)
-# pathology
-hl_all.combined$path <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Pathology)
-)
-# EBV status
-hl_all.combined$ebv <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$EBVStatus)
-)
-# gender
-hl_all.combined$sex <- plyr::mapvalues(x = hl_all.combined$orig.ident, 
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Sex)
-)
-# age
-hl_all.combined$age <- plyr::mapvalues(x = hl_all.combined$orig.ident,
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Age)
-)
-# Stage
-hl_all.combined$stage <- plyr::mapvalues(x = hl_all.combined$orig.ident,
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Stage)
-)
-# early relapse status
-hl_all.combined$earlyRelapse <- plyr::mapvalues(x = hl_all.combined$orig.ident,
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$EarlyRelapse)
-)
-# refractory status
-hl_all.combined$refractory <- plyr::mapvalues(x = hl_all.combined$orig.ident,
-    from = as.vector(final.cohort$Sample), to = as.vector(final.cohort$Refractory)
-)
+# map batch information to orig.idents
+hl_all.orig.idents <- as.data.frame(hl_all.combined$orig.ident)
+hl_all.names <- as.character(hl_all.orig.idents$`hl_all.combined$orig.ident`)
 
-saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.meta_labelled.rds")
+# pathology
+hl_all.combined$biology <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Biology))
+
+# pathology
+hl_all.combined$pathology <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Pathology))
+
+# EBV status
+hl_all.combined$ebv <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$EBVStatus))
+
+# gender
+hl_all.combined$sex <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Sex))
+
+# age
+hl_all.combined$age <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Age))
+
+# stage
+hl_all.combined$stage <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Stage))
+
+# early relapse status
+hl_all.combined$earlyRelapse <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$EarlyRelapse))
+
+# refractory status
+hl_all.combined$refractory <- plyr::mapvalues(x = hl_all.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$Refractory))
+
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.annotated.rds")
 
 # read back in as needed
-hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.combined.annotated.meta_labelled.rds")
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.annotated.rds")
 ```
 
 ## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be tested
@@ -1070,10 +1071,10 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
         tempResults$comparison <- paste(comparators[index.grp1], "_VS_", comparators[index.grp2], sep = "")
         rownames(tempResults) <- NULL
         # change order of columns
-        cols <- c("comparison", "gene", "p_val", "avg_logFC", "pct.1", "pct.2", "p_val_adj")
+        cols <- c("comparison", "gene", "p_val", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")
         tempResults <- tempResults[ cols ]
         # sort by descending fold change
-        tempResults <- tempResults[order(-tempResults$avg_logFC), ]
+        tempResults <- tempResults[order(-tempResults$avg_log2FC), ]
         # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
         tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
         # remove results that have an adjusted p-value of 1
@@ -1178,12 +1179,53 @@ de.test.DESeq2 <- FindMarkers(hl.both.combined,
 ## Differential expression analyses for all comparisons, by cell type (annotated clusters) and by cluster  
 
 ```{r}
+# define working directory:
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/"
+
+## #########################################################
+## 3' assay V2 vs. V3 chemistry
+## #########################################################
+
+Idents(hl_all.combined) <- hl_all.combined$chemistry
+comparators <- sort(unique(hl_all.combined$chemistry))
+
+# though unecessary for this scenario, store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$chemistry))
+
+# perform DE analysis, where odd indices = diagnostic, even indices = relapse
+de.results <- FindMarkers(hl_all.combined, 
+                           assay = "RNA", slot = "data",
+                           ident.1 = comparators[1], 
+                           ident.2 = comparators[2], 
+                           test.use = "MAST", 
+                           latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+                           min.pct = 0.25, 
+                           logfc.threshold = 0)
+# make gene a column
+de.results$gene <- rownames(de.results)
+# add comparison description as a column
+de.results$comparison <- paste(comparators[1], "_VS_", comparators[2], sep = "")
+rownames(de.results) <- NULL
+# change order of columns
+cols <- c("comparison", "gene", "p_val", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")
+de.results <- de.results[ cols ]
+# sort by descending fold change
+de.results <- de.results[order(-de.results$avg_log2FC), ]
+# filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
+de.results <- de.results[ !(grepl("(^RP)|(MT-)|(*orf*)", de.results$gene)), ]
+# remove results that have an adjusted p-value of 1
+de.results <- filter(de.results, de.results$p_val_adj < 1)
+
+write.table(de.results, 
+            paste(work.dir, "de.V2_v_V3.txt", sep=""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+```
+
+```{r}
 ## #########################################################
 ## Cluster-level DE analysis: diagnostic vs. relapse
 ## #########################################################
-
-# define working directory:
-work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/"
 
 ## ------ cell-type level -------
 
@@ -1416,11 +1458,8 @@ write.table(de.early_vs_late_relapse.clusters.df,
             sep = "\t", quote = FALSE, row.names = FALSE)
 
 ## #########################################################
-## Cluster-level DE analysis: HL (diagnostic + relapse) vs. relapse
+## Cluster-level DE analysis: HL (diagnostic + relapse) vs. RLN
 ## #########################################################
-
-# define working directory:
-work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/"
 
 ## ------ cell-type level -------
 
