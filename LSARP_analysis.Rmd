@@ -15,7 +15,9 @@ library(tidyverse)
 library(dplyr)
 library(tidyr)
 library(grid)
+library(gridExtra)
 library(ggplot2)
+library(pheatmap)
 library(cowplot)
 library(patchwork) # for saving R objects to and loading from *.RDS file
 library(scran)
@@ -23,6 +25,8 @@ library(batchelor)
 library(harmony)
 library(SingleR)
 library(celldex)
+library(MAST) # required for DE analysis using MAST option in Seurat FindMarkers
+library(DESeq2)
 ```
 
 ## Examine QC metrics
@@ -166,6 +170,9 @@ hl.merged[["percent.mt"]] <- PercentageFeatureSet(hl.merged, pattern = "^MT-")
 hl.merged.idents <- as.data.frame(hl.merged$orig.ident)
 hl.merged.names <- as.character(hl.merged.idents$`hl.merged$orig.ident`)
 
+# case type
+hl.merged$case.type <- plyr::mapvalues(x = hl.merged.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$case.type))
 # cohort
 hl.merged$cohort <- plyr::mapvalues(x = hl.merged.names, 
     from = as.character(final.cohort$Sample), to = as.character(final.cohort$Cohort))
@@ -229,7 +236,7 @@ hl.v3 <- subset(hl.merged, subset = chemistry == "V3") # 25299 genes, 69454 cell
 # apply filters based on V2 chemistry
 hl.v2 <- subset(hl.v2, subset = nFeature_RNA > 200 & nFeature_RNA < 2000 & percent.mt < 10) # 114,544 cells / 28 samples
 # apply filters based on V3 chemistry
-hl.v3 <- subset(hl.v3, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 25) # 55,078 cells / 17 samples
+hl.v3 <- subset(hl.v3, subset = nFeature_RNA > 200 & nFeature_RNA < 3000 & percent.mt < 20) # 51,650 cells / 17 samples
 
 # merge back together
 hl.merged <- merge(x = hl.v2, y = hl.v3)
@@ -238,7 +245,7 @@ hl.merged <- merge(x = hl.v2, y = hl.v3)
 saveRDS(hl.merged, file = "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.merged.rds")
 ```
 
-## Merging everything together and integrate
+## Perform integration
 
 ```{r}
 # split cases by batch
@@ -252,21 +259,23 @@ hl.split <- lapply(X = hl.split, FUN = function(x) {
 saveRDS(hl.split, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.split.sctransform.rds")
 
 # !!! Remaining steps must be performed on the GSC projects space (insufficient memory on local computer)
+hl.split <- readRDS("hl.split.sctransform.rds")
 
 # select features for downstream integration (NB: 3000 features may be too many for the IntegrateData step)
 hl.features <- SelectIntegrationFeatures(object.list = hl.split, nfeatures = 3000)
 
 # implement `future` framework for parallelization
-plan(multicore) # allow parallelization on maximum cores (32 on gphost)
+# plan(multisession) # allow parallelization on maximum cores (32 on gphost) - results in error
 options(future.globals.maxSize = 15728640000) # allow 15G mem (15*1000*1024^2)
 hl.split <- PrepSCTIntegration(object.list = hl.split, anchor.features = hl.features)
 
 # Specify reference - one batch per cohort (choose batch with highest cell count)
 #   which(names(hl.split) == "CHIP008") ==> 2
-#   which(names(hl.split) == "CHIP020") ==> 10
+#   which(names(hl.split) == "CHIP020") ==> 10 (has the most cells of all datasets)
 #   which(names(hl.split) == "CHIP013") ==> 1
 # Note: this dataset is very large and requires a reference for integration (otherwise leads to large-matrix errors)
-reference.dataset <- c(2, 10, 1)
+# reference.dataset <- c(2, 10, 1)
+reference.dataset <- which(names(hl.split) == "CHIP020")
 
 # Previously, used 2000 features (default) with log normalization (default, not SCT) and dims=1:20 (default is 1:30).
 hl_all.anchors <- FindIntegrationAnchors(object.list = hl.split, 
@@ -274,7 +283,13 @@ hl_all.anchors <- FindIntegrationAnchors(object.list = hl.split,
                                          reference = reference.dataset,
                                          normalization.method = "SCT")
 
+# without a reference
+hl_all.anchors <- FindIntegrationAnchors(object.list = hl.split, 
+                                         anchor.features = hl.features, 
+                                         normalization.method = "SCT")
+
 # saveRDS(hl_all.anchors, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.anchors.rds")
+# options(future.globals.maxSize = 16777216000) # allow 16G mem (16*1000*1024^2)
 hl.integrated <- IntegrateData(anchorset = hl_all.anchors, normalization.method = "SCT")
 # saveRDS(hl.integrated, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.rds")
 
@@ -325,14 +340,11 @@ integrated <- IntegrateData(anchors)
 integrated@tools$Integration@sample.tree
 ```
 
-## Perform integrated analysis
+## Basic assessment of integration
 
 ```{r}
-library(gridExtra)
-library(ggplot2)
-
 # read back in from the GSC
-hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.combined.sctransform.rds")
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.rds")
 
 # run the standard workflow for visualization and clustering
 # hl_all.combined <- ScaleData(hl_all.combined) # this step is not recommended when using scTransform
@@ -344,9 +356,10 @@ ElbowPlot(hl_all.combined, ndims = 50)
 hl_all.combined <- RunUMAP(hl_all.combined, reduction = "pca", dims = 1:30)
 
 # see how well the integration went
-plots <- DimPlot(hl_all.combined, group.by = c("batch", "chemistry"))
-plots & theme(legend.position = "top") & guides(color = guide_legend(nrow = 4, byrow = TRUE, 
-    override.aes = list(size = 2.5)))
+setwd("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/")
+pdf("umap-integrated-by_chip_and_chemistry.pdf", width = 12, height = 5)
+DimPlot(hl_all.combined, group.by = c("batch", "chemistry"))
+dev.off()
 
 # normalize data for visualization purposes
 DefaultAssay(hl_all.combined) <- "RNA"
@@ -366,8 +379,7 @@ p2 <- VlnPlot(hl_all.combined, features = c("JUND"),
 DefaultAssay(hl_all.combined) <- "integrated"
 hl_all.combined <- FindNeighbors(hl_all.combined, reduction = "pca", dims = 1:30)
 hl_all.combined <- FindClusters(hl_all.combined, resolution = 0.5)
-saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.clustered.rds")
-#hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/LATEST/hl_all.integrated.clustered.rds")
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.clustered.rds")
 
 # Visualization
 
@@ -382,61 +394,28 @@ p1 <- DimPlot(hl_all.combined,
 # split by cluster
 p2 <- DimPlot(hl_all.combined, reduction = "umap", label = TRUE) 
 
+pdf("umap-integrated-by_cohort_and_cluster.pdf", width = 12, height = 5)
 grid.arrange(p1, p2, ncol=2)
+dev.off()
 
 # Visualize diagnostic and relapse cases separately
-p3 <- DimPlot(hl_all.combined, reduction = "umap", split.by = "case.type")
+pdf("umap-per_cohort-clusters.pdf", width = 13, height = 5)
+DimPlot(hl_all.combined, reduction = "umap", split.by = "case.type")
+dev.off()
 
 # get list of highly-variable genes
 hl.all.hvg <- hl_all.combined@assays$integrated@var.features
 write.table(hl.all.hvg, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.hgv.txt", sep = "\t", quote = FALSE)
-
-# Examine expression of component marker genes (n=47+) to help annotate clusters
-# extract markers of interest
-markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHGP", "IGHM", "MS4A1", # B cell
-                     "CD28", "CD40LG", "ICOS", "TNFRSF18", "TNFRSF8", # Co-stimulatory molecule
-                     "IFNG", "IL2", "IL4", # Cytokine / chemokine
-                     "GZMA", "GZMB", "GZMK", # Effector molecule
-                     "CTLA4", "HAVCR2", "LAG3", "PDCD1", "TIGIT", # Inhibitory receptor
-                     "CD68", "IDO1", "IL3RA", # Macrophage
-                     "CCR7", "IL7R", "LEF1", # Naive T cell
-                     "NCAM1", # NK cell
-                     "SDC1", #Plasma cell
-                     "CLEC4C", "NRP1", # Plasmacytoid DC
-                     "MKI67", # Proliferation
-                     "CD3D", "CD4", "CD8B", # T cell
-                     "BCL6", "CCR4", "CXCL13", "GATA3", "KLRB1", "TBX21", # T helper
-                     "EOMES", "ID2", # TF
-                     "FOXP3", "IKZF2", "IL2RA", # T reg
-                     "ICOSLG", "CD274", "CD44", "SELL", "CD34", "CXCR5" # not part of 2000 HGV (various categories)
-                     )
-
-FeaturePlot(hl_all.combined, features = markers.to.plot, min.cutoff = "q9")
 ```
 
-## Extract gene expression matrix to customize heatmap 
+## Create heatmap of average expression of clusters across component markers
 
 ```{r}
-library(pheatmap)
-library(dplyr)
+# create heatmap split by component
+component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
 
 # component markers that are in list of HVG:
-markers.to.plot <- c("CD19", "CD27", "IGHD", "IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHGP", "IGHM", "MS4A1", "CD38", # B cell
-                     "CD28", "CD40LG", "ICOS", "TNFRSF18", "TNFRSF8", # Co-stimulatory molecule
-                     "IFNG", "IL2", "IL4", # Cytokine / chemokine
-                     "GZMA", "GZMB", "GZMK", # Effector molecule
-                     "CTLA4", "HAVCR2", "LAG3", "PDCD1", "TIGIT", # Inhibitory receptor
-                     "CD68", "IDO1", "IL3RA", # Macrophage
-                     "CCR7", "IL7R", "LEF1", # Naive T cell
-                     "NCAM1", # NK cell
-                     "SDC1", #Plasma cell
-                     "CLEC4C", "NRP1", # Plasmacytoid DC
-                     "MKI67", # Proliferation
-                     "CD3D", "CD4", "CD8B", # T cell
-                     "BCL6", "CCR4", "CXCL13", "GATA3", "KLRB1", "TBX21", "CXCR5", # T helper
-                     "EOMES", "ID2", # TF
-                     "FOXP3", "IKZF2", "IL2RA" # T reg
-                     )
+markers.to.plot <- component.mappings$Gene
 
 # only look at markers that are in the HVG list
 markers.to.plot <- subset(hl.all.hvg, hl.all.hvg %in% markers.to.plot)
@@ -445,18 +424,12 @@ cluster.averages <- AverageExpression(hl_all.combined,
                                       features = markers.to.plot,
                                       return.seurat = TRUE)
 hl.integrated.cluster.avgs <- GetAssayData(object = cluster.averages, slot = "scale.data")
-# a 1475 (features) X 22 (clusters) matrix
-
-# write.table(hl.integrated.cluster.avgs, "~/Documents/sc_HL_relapse/seurat/output/LATEST/hl.integrated.cluster.avgs.expr.txt", sep = "\t")
-# read back in if needed
-
 hl.integrated.components.cluster.avgs <- hl.integrated.cluster.avgs[ rownames(hl.integrated.cluster.avgs) %in% markers.to.plot , ]
 
-# create heatmap split by component
-component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions_v2.txt", sep = "\t", header = TRUE, fill = TRUE)
-# remove genes that are not part of HVG list (IL4, IDO1, SDC1, NRP1)
+# remove genes that are not part of HVG list (e.g. IL4, IDO1, SDC1, NRP1)
 component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
 rownames(component.mappings) <- component.mappings$Gene
+
 # order by component then gene name so that the heatmap legend makes sense
 components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
 component.mappings$Gene <- NULL
@@ -470,27 +443,25 @@ p4 <- pheatmap(hl.integrated.components.cluster.avgs.ordered,
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(10,15,17,20,25,27,30,31,32,33,36,42,44), border_color = NA)
+         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), border_color = NA)
 
+pdf("heatmap-component_markers-avg_expr_per_cluster.pdf", width = 13, height = 5)
 p4.rotated <- pheatmap(t(hl.integrated.components.cluster.avgs.ordered), 
          annotation_col = component.mappings,
          cluster_cols = FALSE, 
          annotation_names_col = FALSE, 
-         gaps_col = c(10,15,17,20,25,27,30,31,32,33,36,42,44), 
+         gaps_col = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
          angle_col = 45, 
          border_color = NA)
+dev.off()
 
 ```
 
 ## Produce single-cell level heatmaps of expression for EACH cluster
 
 ```{r}
-library(gridExtra)
+NUM_CLUSTERS = 26
 
-NUM_CLUSTERS = 23
-
-# hl.integrated.scaled <- hl_all.combined@assays$integrated@scale.data
-# hl.integrated.data <- hl_all.combined@assays$integrated@data
 hl.integrated.data <- hl_all.combined@assays$SCT@data
 # this is a 1559 (features) X 76607 (barcodes) matrix
 
@@ -498,8 +469,8 @@ hl.integrated.data <- hl_all.combined@assays$SCT@data
 hl.integrated.markers <- hl.integrated.data[ rownames(hl.integrated.data) %in% markers.to.plot , ]
 
 # create heatmap split by component
-component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions_v2.txt", sep = "\t", header = TRUE, fill = TRUE)
-# remove genes that are not part of HVG list (IL4, IDO1, SDC1, NRP1)
+component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
+# remove genes that are not part of HVG list (IL4, IDO1, NRP1)
 component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
 # order by component then gene name so that the heatmap legend makes sense
 rownames(component.mappings) <- component.mappings$Gene
@@ -529,14 +500,13 @@ for (c in 1:NUM_CLUSTERS) {
   hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot) # filter by genes
   
   # retrieve expression for each cell across the component genes of interest
-  # expr.temp <- hl.seurat[[c]]@assays$integrated@scale.data
   expr.temp <- hl.seurat[[c]]@assays$SCT@data
   expr.markers[[c]] <- expr.temp[ rownames(expr.temp) %in% markers.to.plot , ]
   
   # reorder expression matrix to match component mappings
   expr.markers[[c]] <- expr.markers[[c]][ row.names(components.ordered), ]
 
-  filename <- paste("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/heatmaps/sctransform/heatmap-sctransform-cluster", 
+  filename <- paste("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/heatmaps/heatmap-cluster", 
                     c-1, ".pdf", sep = "")
   pdf(filename, width = 8, height = 8)
   heatmaps[[c]] <- pheatmap(expr.markers[[c]], 
@@ -544,82 +514,102 @@ for (c in 1:NUM_CLUSTERS) {
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(11,16,18,21,26,28,31,32,33,34,37,44,46,49), 
+         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
          border_color = NA, show_colnames = FALSE, scale = "none")
   dev.off()
 }
 
-# plot all 22 heatmaps
-#grid.arrange(grobs = heatmaps, ncol=3)
-# grid.arrange(arrangeGrob(grobs = heatmaps, ncol=3))
 ```
 
 ## Rename clusters based on feature plots
 
 ```{r}
-library(ggplot2)
-library(dplyr)
-library(gridExtra)
-
-# Tomo's latest mappings (as of July 21, 2020)
+# Tomo's latest mappings (as of November 19, 2020)
 hl_all.combined <- RenameIdents(hl_all.combined,
                                 `0` = "Naive B cell",
                                 `1` = "Naive T cell",
-                                `2` = "Naive T cell",
-                                `3` = "Naive B cell",
-                                `4` = "Naive T cell",
+                                `2` = "Naive B cell",
+                                `3` = "Naive T cell",
+                                `4` = "T reg",
                                 `5` = "Naive B cell",
                                 `6` = "T helper",
-                                `7` = "T-reg",
-                                `8` = "CTL",
-                                `9` = "T helper",
-                                `10` = "B cell",
-                                `11` = "Naive B cell",
+                                `7` = "CTL",
+                                `8` = "T helper",
+                                `9` = "Naive B cell",
+                                `10` = "T reg/T helper",
+                                `11` = "B cell",
                                 `12` = "Naive CD8 cell",
-                                `13` = "B cell",
-                                `14` = "Naive B cell",
-                                `15` = "T-reg",
-                                `16` = "GCB and T cell proliferation",
-                                `17` = "Naive CD8 cell",
-                                `18` = "NK cell",
-                                `19` = "Naive B cell",
-                                `20` = "Plasma cell",
-                                `21` = "pDC",
-                                `22` = "macrophage")
+                                `13` = "Naive B cell",
+                                `14` = "Naive T cell",
+                                `15` = "T reg",
+                                `16` = "Naive B cell",
+                                `17` = "Naive T cell",
+                                `18` = "B cell",
+                                `19` = "NK cell",
+                                `20` = "GCB and T cell proliferation",
+                                `21` = "Naive B cell",
+                                `22` = "Naive B cell",
+                                `23` = "Macrophage/pDC",
+                                `24` = "Plasma cell",
+                                `25` = "Naive B cell")
 hl_all.combined$celltype <- Idents(hl_all.combined)
-saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl_all.integrated.annotated.rds")
+saveRDS(hl_all.combined, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.annotated.rds")
 
 # Now plot the new annotations
+pdf("umap-annotated_clusters.pdf", width = 8, height = 7)
 DimPlot(hl_all.combined, reduction = "umap", label = TRUE, pt.size = 0.2)
+dev.off()
 
 # create a barplot to show the numbers of cells in each cluster / component type
 celltype.numcells <- as.data.frame(table(hl_all.combined$celltype))
-colnames(celltype.numcells) <- c("celltype", "numcells")
+celltype.numcells$temp <- "NA"
+colnames(celltype.numcells) <- c("celltype", "numcells", "temporarycol")
 
-p <- ggplot(celltype.numcells, aes(x = celltype, y = numcells)) + 
-      geom_bar(stat = "identity", width = 0.8, fill="darkblue") + 
+p <- ggplot(celltype.numcells, aes(x = reorder(celltype, -numcells), y = numcells, fill=temporarycol)) + 
+      geom_bar(stat = "identity", width = 0.8) + 
+      scale_fill_manual(values=c("darkblue"))+
       xlab("") + ylab("") + 
       ylim(0, 78000) +
       theme(axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) +
       theme(panel.spacing = unit(1, "lines")) +
-      theme(legend.title = element_blank()) +
-      geom_text(aes(label=numcells), hjust=0.5, vjust=-1, size=4, color="gray47")
+      geom_text(aes(label=numcells), hjust=0.5, vjust=-1, size=3, color="gray47") +
+      theme(legend.position="right")
 
+# create barplot showing proportion of cells per cell type baed on case type
 celltype.numcells2 <- as.data.frame(table(hl_all.combined$celltype, hl_all.combined$case.type))
 colnames(celltype.numcells2) <- c("celltype", "case_type", "numcells")
 
-p.log <- ggplot(celltype.numcells2, aes(x = celltype, y = numcells, fill = case_type)) + 
+p.log <- ggplot(celltype.numcells2, aes(x = reorder(celltype, -numcells), y = numcells, fill = case_type)) + 
+      geom_bar(position = "fill", stat = "identity", width = 0.8) + 
+      scale_y_continuous(labels = scales::percent_format()) +
+      xlab("") + ylab("") + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+      theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+      theme(panel.spacing = unit(1, "lines")) + 
+      theme(legend.title = element_blank()) +
+      theme(legend.position="right")
+
+# create a similar barplot, but showing proportion of cells per cell type that are V2 vs. V3
+celltype.numcells3 <- as.data.frame(table(hl_all.combined$celltype, hl_all.combined$chemistry))
+colnames(celltype.numcells3) <- c("celltype", "chemistry", "numcells")
+
+p.chem <- ggplot(celltype.numcells3, aes(x = reorder(celltype, -numcells), y = numcells, fill = chemistry)) + 
       geom_bar(position = "fill", stat = "identity", width = 0.8) + 
       scale_y_continuous(labels = scales::percent_format()) +
       xlab("") + ylab("") + 
       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
       theme(panel.spacing = unit(1, "lines")) + 
       theme(legend.title = element_blank()) +
-      theme(legend.position="bottom")
-      
-grid.arrange(p, p.log)
+      theme(legend.position="right") +
+      scale_fill_manual(values=c("cornflowerblue", "indianred3"), labels=c("V2 assay ", "V3 assay "))
+
+pdf("barplot-num_cells_and_cohort_ratios_per_cluster.pdf", width = 8, height = 8)
+grid.arrange(p, p.log, p.chem, ncol=1, nrow=3, widths=c(8), heights=c(4,3,6))
+dev.off()
 
 # create a stacked barplot to show the proportion of each cell identity by sample
 sample.celltype_num <- as.data.frame(table(hl_all.combined$orig.ident, hl_all.combined$celltype))
@@ -636,7 +626,8 @@ temp <- temp[ order(temp$cell_identity, -temp$proportion) , ]
 # set the order in the full dataframe
 sample.celltype_num$sample_id <- factor(sample.celltype_num$sample_id, levels = temp$sample_id)
 
-p <- ggplot(sample.celltype_num, 
+pdf("barplot-cell_types_per_sample.pdf", width = 9, height = 4.5)
+ggplot(sample.celltype_num, 
             aes(x=sample_id, y=num_cells, fill=cell_identity)) +
   geom_bar(position = "fill", stat = "identity")+
   scale_y_continuous(labels = scales::percent_format()) +
@@ -644,20 +635,21 @@ p <- ggplot(sample.celltype_num,
   scale_fill_manual(name = "Cell Identity",
                     values = c("Naive B cell" = "darkslateblue",
                                "Naive T cell" = "slategray4",
-                               "T helper" = "aquamarine3",
-                               "T-reg" = "hotpink3", 
+                               "T reg" = "aquamarine3", #aquamarine3
+                               "T helper" = "hotpink3",
                                "CTL" = "olivedrab4",
-                               "B cell"="bisque3",
-                               "Naive CD8 cell"="royalblue1",
-                               "GCB and T cell proliferation"="firebrick3",
-                               "NK cell"="darkorange",
-                               "Plasma cell"="mediumpurple1",
-                               "pDC"="green3",
-                               "macrophage"="magenta3"
+                               "T reg/T helper" = "bisque3",#bisque3
+                               "B cell"="royalblue1",#royalblue1
+                               "Naive CD8 cell"="firebrick3",#firebrick3
+                               "NK cell"="darkorange",#darkorange
+                               "GCB and T cell proliferation"="mediumpurple1",#mediumpurple1
+                               "Macrophage/pDC"="green3",
+                               "Plasma cell"="magenta3"#magenta3
                                )) +
 
   xlab("") +
   ylab("")
+dev.off()
 
 ```
 
@@ -780,16 +772,7 @@ dp <- DotPlot(
 
 Check out https://nbisweden.github.io/excelerate-scRNAseq/session-de/session-de-methods.html for a review of DE methods that can be applied to scRNAseq data (not just those integrated in Seurat)
 
-!!!Important!!! Use the uncorrected raw (but normalized) expression data to perform DE
-
 ```{r}
-library(ggplot2)
-library(cowplot)
-theme_set(theme_cowplot())
-library(MAST) # required for DE analysis using MAST option in Seurat FindMarkers
-library(DESeq2)
-library(Seurat)
-
 # change default assay to RNA
 DefaultAssay(hl_all.combined) <- "RNA"
 # normalize and scale data for DE testing
@@ -823,96 +806,10 @@ Idents(hl_all.combined) <- hl_all.combined$case.type # make case type the main i
 # }
 ```
 
-## Peform all the DE comparisons - remember to perform DE analysis on *unintegrated* data (stored in "RNA" assay) --> also allows all 20,792 genes to be tested
 
-## For FindMarkers function, NB: group 1 vs. group 2 indicates for avg_logFC (log fold-chage of the average expression between the two groups), a POSITIVE value indicates the gene is MORE HIGHLY EXPRESSED in the FIRST group (i.e. group 1).
+For FindMarkers function, NB: group 1 vs. group 2 indicates for avg_logFC (log fold-chage of the average expression between the two groups), a POSITIVE value indicates the gene is MORE HIGHLY EXPRESSED in the FIRST group (i.e. group 1).
 
-## NB NB: The following DE analyses look for DE genes between cohorts (e.g. all relapse vs. all diagnostic), and are not cluster-specific -- cluster-based analyses follow later.
-
-```{r}
-de.results <- vector('list', 6)
-
-# 1. diagnostic vs. relapse (early + late)
-Idents(hl_all.combined) <- hl_all.combined$case.type
-de.diag_vs_rel <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "diagnostic", 
-                              ident.2 = "relapse", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[1]] <- de.diag_vs_rel
-# write results to output
-#write.table(de.diag_vs_rel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
-
-# 2. diagnostic vs. early relapse
-Idents(hl_all.combined) <- hl_all.combined$earlyRelapse
-de.diag_vs_earlyrel <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "diagnostic", 
-                              ident.2 = "earlyRelapse", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[2]] <- de.diag_vs_earlyrel
-#write.table(de.diag_vs_earlyrel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_early_relapse.MAST.txt", sep = "\t", quote = FALSE)
-
-# 3. diagnostic vs. late relapse
-de.diag_vs_laterel <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "diagnostic", 
-                              ident.2 = "lateRelapse", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[3]] <- de.diag_vs_laterel
-#write.table(de.diag_vs_laterel, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_late_relapse.MAST.txt", sep = "\t", quote = FALSE)
-
-# 4. early relapse vs. late relapse
-de.early_vs_late <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "earlyRelapse", 
-                              ident.2 = "lateRelapse", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[4]] <- de.early_vs_late
-#write.table(de.early_vs_late, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.early_vs_late_relapse.MAST.txt", sep = "\t", quote = FALSE)
-
-# 5. diagnostic vs. refractory
-Idents(hl_all.combined) <- hl_all.combined$refractory 
-de.diag_vs_refractory <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "diagnostic", 
-                              ident.2 = "relapseRefractory", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[5]] <- de.diag_vs_refractory
-#write.table(de.diag_vs_refractory, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.diag_vs_refractory.MAST.txt", sep = "\t", quote = FALSE)
-
-# 6. refractory vs. relapse (early + late)
-de.refractory_vs_relapse <- FindMarkers(hl_all.combined, assay = "RNA", 
-                              ident.1 = "relapseRefractory", 
-                              ident.2 = "relapseNotRefractory", 
-                              test.use = "MAST",
-                              min.pct = 0.25, 
-                              logfc.threshold = 0.25)
-de.results[[6]] <- de.refractory_vs_relapse
-#write.table(de.refractory_vs_relapse, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/rna.refractory_vs_relapse.MAST.txt", sep = "\t", quote = FALSE)
-```
-
-## Filter out DE results
-
-```{r}
-library(dplyr)
-
-output.files <- c("diag_vs_relapse", "diag_vs_early_relapse", "diag_vs_late_relapse", "early_vs_late_relapse", "diag_vs_refractory", "refractory_vs_relapse")
-output.folder <- "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/de_analysis/"
-
-# Remove "*orf*" "^RP" and "MT-" proteins
-for (i in 1:length(de.results)) {
-  file.output <- paste(output.folder, output.files[i], ".txt", sep = "")
-  de.results[[i]] <- de.results[[i]][ !(grepl("(^RP)|(MT-)|(*orf*)", rownames(de.results[[i]]))), ]
-  write.table(de.results[[i]], file.output, sep = "\t", quote = FALSE)
-}
-
-```
+*Important:* Use the uncorrected raw (but normalized) expression data to perform DE (set default assay to RNA)
 
 ## Functions to perform DE comparisons at the cluster (cell type) level
 
@@ -1059,10 +956,19 @@ de.test.DESeq2 <- FindMarkers(hl.both.combined,
 
 ## Differential expression analyses for all comparisons, by cell type (annotated clusters) and by cluster  
 
+*Remeber to use raw + normalized data for DE analysis*
+
 ```{r}
+# change default assay to RNA
+DefaultAssay(hl_all.combined) <- "RNA"
+# normalize and scale data for DE testing
+hl_all.combined <- NormalizeData(hl_all.combined)
+
 # define working directory:
 work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/"
+```
 
+```{r}
 ## #########################################################
 ## 3' assay V2 vs. V3 chemistry
 ## #########################################################
@@ -1070,7 +976,7 @@ work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/"
 Idents(hl_all.combined) <- hl_all.combined$chemistry
 comparators <- sort(unique(hl_all.combined$chemistry))
 
-# though unecessary for this scenario, store number of cells for each comparator
+# though unnecessary for this scenario, store number of cells for each comparator
 cell_counts.df <- as.data.frame(table(hl_all.combined$chemistry))
 
 # perform DE analysis, where odd indices = diagnostic, even indices = relapse
@@ -1095,7 +1001,7 @@ de.results <- de.results[order(-de.results$avg_log2FC), ]
 # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
 de.results <- de.results[ !(grepl("(^RP)|(MT-)|(*orf*)", de.results$gene)), ]
 # remove results that have an adjusted p-value of 1
-de.results <- filter(de.results, de.results$p_val_adj < 1)
+temp <- dplyr::filter(de.results, as.numeric(de.results$p_val_adj) < 1)
 
 write.table(de.results, 
             paste(work.dir, "de.V2_v_V3.txt", sep=""),
