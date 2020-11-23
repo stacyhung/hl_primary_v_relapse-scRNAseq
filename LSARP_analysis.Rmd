@@ -346,6 +346,14 @@ integrated@tools$Integration@sample.tree
 # read back in from the GSC
 hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.rds")
 
+# map metadata
+hl_all.combined.idents <- as.data.frame(hl_all.combined$orig.ident)
+hl_all.combined.names <- as.character(hl_all.combined.idents$`hl_all.combined$orig.ident`)
+
+# case type
+hl_all.combined$case.type <- plyr::mapvalues(x = hl_all.combined.names, 
+    from = as.character(final.cohort$Sample), to = as.character(final.cohort$case.type))
+
 # run the standard workflow for visualization and clustering
 # hl_all.combined <- ScaleData(hl_all.combined) # this step is not recommended when using scTransform
 hl_all.combined <- RunPCA(hl_all.combined)
@@ -661,18 +669,112 @@ See http://127.0.0.1:16348/library/celldex/doc/userguide.html#2_General-purpose_
 library(celldex)
 library(SingleR)
 
-# get reference data
-ref_data <- HumanPrimaryCellAtlasData()
-# pull matrix from Seurat Object
-singler_data <- as.SingleCellExperiment(hl_all.combined)
-# Get cell type information
-cell <- SingleR(singler_data, ref_data, labels = ref_data$label.main) 
-cell2 <- SingleR(singler_data, ref_data, labels = ref_data$label.fine)
-cell3 <- SingleR(singler_data, ref_data, labels = ref_data$label.ont)
-# Store cell type information into Seurat Object
-hl_all.combined[['SingleR.HPCA.labels.main']] <- cell$labels # what about cell$pruned.labels or cell$first.labels?
-hl_all.combined[['SingleR.HPCA.labels.pruned']] <- cell$pruned.labels
+# focus on macrophage / pDC cluster
+hl.macrophage_pDC <- subset(x = hl_all.combined, subset = celltype == "Macrophage/pDC")
+# Result: 514 cells (from a total of 166194; 0.3% of cells are kept)
 
+# pull matrix from Seurat Object
+singler_data <- as.SingleCellExperiment(hl.macrophage_pDC)
+
+# get reference data
+# ref <- HumanPrimaryCellAtlasData() # deprecated
+# ref <- BlueprintEncodeData()
+# ref <- ImmGenData()
+# ref <- DatabaseImmuneCellExpressionData()
+# ref <- NovershternHematopoieticData()
+ref <- MonacoImmuneData()
+
+# Get cell type information
+cell.main <- SingleR(singler_data, ref, labels = ref$label.main) 
+# cell.fine <- SingleR(singler_data, ref.data, labels = ref.data$label.fine)
+
+# Store cell type information into Seurat Object
+# hl.macrophage_pDC[['HPCA.labels.main']] <- cell.main$labels
+# hl.macrophage_pDC[['Blueprint.labels.main']] <- cell.main$labels
+# hl.macrophage_pDC[['ImmGen.labels.main']] <- cell.main$labels
+# hl.macrophage_pDC[['DbImmuneCell.labels.main']] <- cell.main$labels
+# hl.macrophage_pDC[['Novershtern.labels.main']] <- cell.main$labels
+hl.macrophage_pDC[['Monaco.labels.main']] <- cell.main$labels
+
+hl.macrophage_pDC <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.macrophage_pDC.celldex.rds")
+
+# visualize on umap and with heatmaps
+p1 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "HPCA.labels.main") + 
+  labs(color = "HPCA") 
+p2 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "Blueprint.labels.main") +
+  labs(color = "Blueprint Encode") 
+p3 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "ImmGen.labels.main") +
+  labs(color = "ImmGen") 
+p4 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "DbImmuneCell.labels.main") +
+  labs(color = "DB Immune Cell") 
+p5 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "Novershtern.labels.main") +
+  labs(color = "Novershtern") 
+p6 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "Monaco.labels.main") +
+  labs(color = "Monaco") 
+
+pdf("umap-macrophage_pDC_celldex.pdf", width = 14, height = 7)
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol=3)
+dev.off()
+```
+
+## Draw heatmaps for celldex annotations
+
+```{r}
+# Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$HPCA.labels.main
+# Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$Blueprint.labels.main
+# Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$ImmGen.labels.main
+# Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$DbImmuneCell.labels.main
+# Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$Novershtern.labels.main
+Idents(hl.macrophage_pDC) <- hl.macrophage_pDC$Monaco.labels.main
+```
+
+```{r}
+# create heatmap split by component
+component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
+
+# component markers that are in list of HVG:
+markers.to.plot <- component.mappings$Gene
+
+# only look at markers that are in the HVG list
+markers.to.plot <- subset(hl.all.hvg, hl.all.hvg %in% markers.to.plot)
+
+cluster.averages <- AverageExpression(hl.macrophage_pDC, 
+                                      features = markers.to.plot,
+                                      return.seurat = TRUE)
+hl.macrophage_pDC.cluster.avgs <- GetAssayData(object = cluster.averages, slot = "scale.data")
+hl.macrophage_pDC.components.cluster.avgs <- hl.macrophage_pDC.cluster.avgs[ rownames(hl.macrophage_pDC.cluster.avgs) %in% markers.to.plot , ]
+
+# remove genes that are not part of HVG list (e.g. IL4, IDO1, SDC1, NRP1)
+component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+rownames(component.mappings) <- component.mappings$Gene
+
+# order by component then gene name so that the heatmap legend makes sense
+components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+component.mappings$Gene <- NULL
+component.mappings$Alt_name <- NULL
+
+# reorder expression matrix to match component mappings
+hl.macrophage_pDC.components.cluster.avgs.ordered <- hl.macrophage_pDC.components.cluster.avgs[ match(rownames(components.ordered), rownames(hl.macrophage_pDC.components.cluster.avgs)), ]
+```
+
+```{r}
+# ref_name <- "HPCA" # 6 x 10
+# ref_name <- "Blueprint" # 4.75 x 10
+# ref_name <- "ImmGen" # 5 X 10
+# ref_name <- "DBImmuneCell" # 4.75 x 10
+# ref_name <- "Novershtern" # 5.5 x 10
+ref_name <- "Monaco" # 5 x 10
+
+pdf(paste("heatmap-macrophage_pDC-", ref_name, "-component_markers-avg_expr_per_celltype.pdf", sep = ""), 
+    width = 4.75, height = 10)
+pheatmap(hl.macrophage_pDC.components.cluster.avgs.ordered, 
+         annotation_row = component.mappings,
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         angle_col = 90,
+         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
+         border_color = NA, main = ref_name)
+dev.off()
 
 ```
 
@@ -856,7 +958,7 @@ get_de_genes <- function(comparators, de.test, cell_counts.df) {
         # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
         tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
         # remove results that have an adjusted p-value of 1
-        tempResults <- filter(tempResults, tempResults$p_val_adj < 1)
+        tempResults <- dplyr::filter(tempResults, tempResults$p_val_adj < 1)
         
         # !!! NB: this step will fail if tempResults is empty (e.g. all adjusted p-values are 1)
         # store the processed results in the final result array
@@ -1001,12 +1103,51 @@ de.results <- de.results[order(-de.results$avg_log2FC), ]
 # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
 de.results <- de.results[ !(grepl("(^RP)|(MT-)|(*orf*)", de.results$gene)), ]
 # remove results that have an adjusted p-value of 1
-temp <- dplyr::filter(de.results, as.numeric(de.results$p_val_adj) < 1)
+de.results <- dplyr::filter(de.results, as.numeric(de.results$p_val_adj) < 1)
 
 write.table(de.results, 
             paste(work.dir, "de.V2_v_V3.txt", sep=""),
             sep = "\t", quote = FALSE, row.names = FALSE)
 
+```
+
+```{r}
+## #########################################################
+## Cluster-level DE analysis: V2 vs. V3 assay
+## #########################################################
+
+## ------ cell-type level -------
+
+# define comparators (for annotated cell types)
+hl_all.combined$celltype.chem <- paste(hl_all.combined$celltype, hl_all.combined$chemistry, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$celltype.chem
+comparators <- sort(unique(hl_all.combined$celltype.chem))
+
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$celltype.chem))
+
+# perform DE analysis, where odd indices = diagnostic, even indices = relapse
+de.V2_vs_V3.celltypes <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
+de.V2_vs_V3.celltypes.df <- merge_de_results(de.V2_vs_V3.celltypes)
+write.table(de.V2_vs_V3.celltypes.df, 
+            paste(work.dir, "de.V2_vs_V3.celltypes.txt", sep=""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+## ------ cluster level -------
+
+hl_all.combined$cluster.chem <- paste(hl_all.combined$seurat_clusters, hl_all.combined$chemistry, sep = "_")
+Idents(hl_all.combined) <- hl_all.combined$cluster.chem
+comparators <- sort(unique(hl_all.combined$cluster.chem))
+
+# store number of cells for each comparator
+cell_counts.df <- as.data.frame(table(hl_all.combined$cluster.chem))
+
+# perform DE analysis, where odd indices = diagnostic, even indices = relapse
+de.V2_vs_V3.clusters <- get_de_genes(comparators = comparators, de.test = "MAST", cell_counts.df = cell_counts.df)
+de.V2_vs_V3.clusters.df <- merge_de_results(de.V2_vs_V3.clusters)
+write.table(de.V2_vs_V3.clusters.df, 
+            paste(work.dir, "de.V2_vs_V3.clusters.txt", sep=""),
+            sep = "\t", quote = FALSE, row.names = FALSE)
 ```
 
 ```{r}
