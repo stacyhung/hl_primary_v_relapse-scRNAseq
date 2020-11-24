@@ -1765,32 +1765,39 @@ VP_by_gene <- function(gene_list,
 ## Latest version of violin plots (coloured by mean value)
 
 ```{r}
-# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
-VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_rel", 
-         comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("Plasmacytoid DCs"), 
-         width=10, height=10)
+# # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
+# VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
+#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_rel", 
+#          comp_grps = list(c("diagnostic", "relapse")), 
+#          cluster_or_cell_types = c("Plasmacytoid DCs"), 
+#          width=10, height=10)
+# 
+# # 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
+# VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
+#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_rel", 
+#          comp_grps = list(c("diagnostic", "relapse")), 
+#          cluster_or_cell_types = c("Macrophage"), 
+#          width=20, height=10)
 
-# 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
-VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_rel", 
-         comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("Macrophage"), 
+# 2. Macrophage/pDC cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5, GZMB
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC-diag_vs_rel",
+         comp_grps = list(c("diagnostic", "relapse")),
+         cluster_or_cell_types = c("Macrophage/pDC"),
          width=20, height=10)
 
 # 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("Treg"), 
+         cluster_or_cell_types = c("T reg"), 
          width=20, height=10)
 
 # 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("Helper T cells"), 
+         cluster_or_cell_types = c("T helper"), 
          width=20, height=10)
 
 # 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
@@ -1804,7 +1811,7 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/NK-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("NK cells"), 
+         cluster_or_cell_types = c("NK cell"), 
          width=20, height=10)
 
 # 3. Treg cluster (cluster 4): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
@@ -1819,7 +1826,7 @@ VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT_cluster1-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("1"), 
+         cluster_or_cell_types = c("8"), 
          width=20, height=10, 
          isCluster = TRUE)
 
@@ -1827,7 +1834,7 @@ VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL_cluster8-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
-         cluster_or_cell_types = c("8"), 
+         cluster_or_cell_types = c("7"), 
          width=20, height=10, 
          isCluster = TRUE)
 
@@ -1836,19 +1843,26 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 # diagnostic VS early relapse
 # ############################
 
-# 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
-VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_early_rel", 
-         comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("Plasmacytoid DCs"), 
-         width=10, height=10, 
-         earlyRelapse = TRUE)
+# # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
+# VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
+#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_early_rel", 
+#          comp_grps = list(c("diagnostic", "earlyRelapse")), 
+#          cluster_or_cell_types = c("Plasmacytoid DCs"), 
+#          width=10, height=10, 
+#          earlyRelapse = TRUE)
+# 
+# # 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
+# VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
+#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_early_rel", 
+#          comp_grps = list(c("diagnostic", "earlyRelapse")), 
+#          cluster_or_cell_types = c("Macrophage"), 
+#          width=20, height=10, 
+#          earlyRelapse = TRUE)
 
-# 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
-VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_early_rel", 
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("Macrophage"), 
+         cluster_or_cell_types = c("Macrophage/pDC"), 
          width=20, height=10, 
          earlyRelapse = TRUE)
 
@@ -1856,7 +1870,7 @@ VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CX
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("Treg"), 
+         cluster_or_cell_types = c("T reg"), 
          width=20, height=10, 
          earlyRelapse = TRUE)
 
@@ -1864,7 +1878,7 @@ VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("Helper T cells"), 
+         cluster_or_cell_types = c("T helper"), 
          width=20, height=10, 
          earlyRelapse = TRUE)
 
@@ -1880,7 +1894,7 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/NK-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("NK cells"), 
+         cluster_or_cell_types = c("NK cell"), 
          width=20, height=10, 
          earlyRelapse = TRUE)
 
@@ -1896,7 +1910,7 @@ VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT_cluster1-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("1"), 
+         cluster_or_cell_types = c("8"), 
          width=20, height=10, 
          isCluster = TRUE, earlyRelapse = TRUE)
 
@@ -1904,7 +1918,7 @@ VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL_cluster8-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
-         cluster_or_cell_types = c("8"), 
+         cluster_or_cell_types = c("7"), 
          width=20, height=10, 
          isCluster = TRUE, earlyRelapse = TRUE)
   
