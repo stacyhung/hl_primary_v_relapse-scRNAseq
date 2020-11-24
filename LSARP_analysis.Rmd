@@ -1663,6 +1663,12 @@ VP_by_gene(gene_list = c("CD80", "CD86"),
          width=12, height=3, 
          isCluster = FALSE, earlyRelapse = TRUE, biology = FALSE)
 
+# V2 vs. V3 for significantly up-regulated V3 genes
+VP_by_gene_for_chemistry(gene_list = v2_v_v3.de.sig_genes,
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/V2_vs_V3-sig_genes_up_in_V3", 
+         comp_grps = list(c("V2", "V3")),
+         width = 40, height = 30)
+
 #####################################################################################
 
 # Function: Create gradient breaks using quantiles of data
@@ -1752,14 +1758,49 @@ VP_by_gene <- function(gene_list,
   ggsave(file_name, width = width, height = height)
 }
 
-## TEST ##
-# VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4"),
-#          file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_rel_TEST", 
-#          comp_grps = list(c("diagnostic", "relapse")),
-#          cluster_or_cell_types = c("CTL"), 
-#          width = 20, height = 10,
-#          isCluster = FALSE)
+# violin plots for V2 vs. V3 chemistry
 
+VP_by_gene_for_chemistry <- function(gene_list, 
+                       file_name, 
+                       comp_grps, 
+                       width, 
+                       height) {
+  
+  data.df <- NULL
+  expr.df <- NULL
+
+  plot_one_gene <- function(gene){
+    
+    # Step 1: create expr.df dataset (contains columns: expr, chemistry version, mean_expr)
+    Idents(hl_all.combined) <- hl_all.combined$chemistry
+    # Get the expression data
+    data.df <- data.frame(expr = hl_all.combined[["RNA"]]@data[gene,], 
+                              chemistry = hl_all.combined$chemistry)
+    expr.df <- data.df %>% filter(chemistry %in% comp_grps[[1]])
+
+    # Step 2: Calculate mean / median
+    expr.df <- as.data.frame(expr.df %>%
+        select(expr, chemistry) %>%
+        group_by(chemistry) %>%
+        mutate(mean_expr = mean(expr)))
+
+    # Step 3: Plot (note that we are using the Wilcoxon-rank-sum test (deals with smaller numbers better))
+    ggplot(expr.df, aes(x = chemistry, y = expr)) + 
+      geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+      #scale_y_continuous(trans='log2') +
+      # Add 10% space on the y-axis above the box plots
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      stat_compare_means(comparisons = comp_grps, label = "p.format") +
+      stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.1) +
+      xlab("") + ylab("") + ggtitle(gene) +
+      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)) +
+      theme(axis.text = element_text(size = 12))
+    
+  }
+  purrr::map(gene_list, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
+  file_name <- paste(file_name, ".png", sep = "")
+  ggsave(file_name, width = width, height = height)
+}
 ```
 
 ## Latest version of violin plots (coloured by mean value)
@@ -1928,9 +1969,9 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 
 # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
 VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-HL_vs_RLN", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC-HL_vs_RLN", 
          comp_grps = list(c("HL", "RLN")), 
-         cluster_or_cell_types = c("Plasmacytoid DCs"), 
+         cluster_or_cell_types = c("Macrophage/pDC"), 
          width=10, height=10, 
          biology = TRUE)
 
