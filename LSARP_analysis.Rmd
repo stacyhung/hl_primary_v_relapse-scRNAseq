@@ -402,6 +402,12 @@ p1 <- DimPlot(hl_all.combined,
 # split by cluster
 p2 <- DimPlot(hl_all.combined, reduction = "umap", label = TRUE) 
 
+# Plot clusters by themselves
+pdf("umap-clusters.pdf", width = 8, height = 7)
+p2
+dev.off()
+
+# Plot cohort-level and cluster-level umap
 pdf("umap-integrated-by_cohort_and_cluster.pdf", width = 12, height = 5)
 grid.arrange(p1, p2, ncol=2)
 dev.off()
@@ -663,7 +669,7 @@ dev.off()
 
 ## Assign cell types using celldex
 
-See http://127.0.0.1:16348/library/celldex/doc/userguide.html#2_General-purpose_references for all references
+See https://bioconductor.org/packages/release/data/experiment/vignettes/celldex/inst/doc/userguide.html
 
 ```{r}
 library(celldex)
@@ -685,8 +691,7 @@ singler_data <- as.SingleCellExperiment(hl.macrophage_pDC)
 ref <- MonacoImmuneData()
 
 # Get cell type information
-cell.main <- SingleR(singler_data, ref, labels = ref$label.main) 
-# cell.fine <- SingleR(singler_data, ref.data, labels = ref.data$label.fine)
+cell.main <- SingleR(singler_data, ref, labels = ref$label.main)
 
 # Store cell type information into Seurat Object
 # hl.macrophage_pDC[['HPCA.labels.main']] <- cell.main$labels
@@ -1485,7 +1490,7 @@ colnames(expr.cluster_filtered.df.anno)[colnames(expr.cluster_filtered.df.anno) 
 write.table(expr.cluster_filtered.df.anno, "~/Documents/sc_HL_relapse/seurat/output/diagnostic_plus_relapse/hl_combined.norm_expr.macrophage_t_cell_clusters.annotated.txt", sep = "\t")
 ```
 
-## Visualizing differential expression
+## Visualizing differential expression using Seurat
 
 ```{r}
 # violin plot split by dataset (primary vs. relapse) per gene showing expression across clusters ("celltype")
@@ -1668,7 +1673,15 @@ custom_quantile <- function(x) {
 }
 
 # Function: Generate plots for a given set of genes looking at a specific cell type / cluster and comparison
-VP_by_gene <- function(gene_list, file_name, comp_grps, cluster_or_cell_types, width, height, isCluster, earlyRelapse, biology){
+VP_by_gene <- function(gene_list, 
+                       file_name, 
+                       comp_grps, 
+                       cluster_or_cell_types, 
+                       width, 
+                       height, 
+                       isCluster = FALSE, 
+                       earlyRelapse = FALSE, 
+                       biology = FALSE){
   
   data.df <- NULL
   expr.df <- NULL
@@ -1754,75 +1767,69 @@ VP_by_gene <- function(gene_list, file_name, comp_grps, cluster_or_cell_types, w
 ```{r}
 # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
 VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("Plasmacytoid DCs"), 
-         width=10, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=10, height=10)
 
 # 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
 VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/macrophage-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("Macrophage"), 
-         width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=20, height=10)
 
 # 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("Treg"), 
-         width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=20, height=10)
 
 # 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("Helper T cells"), 
-         width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=20, height=10)
 
 # 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("CTL"), 
-         width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=20, height=10)
 
 # 9. NK cells: GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/NK-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/NK-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("NK cells"), 
-         width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE)
+         width=20, height=10)
 
 # 3. Treg cluster (cluster 4): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg_cluster4-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg_cluster4-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("4"), 
          width=20, height=10, 
-         isCluster = TRUE, earlyRelapse = FALSE)
+         isCluster = TRUE)
 
 # 5. Helper T cell (cluster 1): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT_cluster1-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT_cluster1-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("1"), 
          width=20, height=10, 
-         isCluster = TRUE, earlyRelapse = FALSE)
+         isCluster = TRUE)
 
 # 7. CTL (cluster 8): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL_cluster8-diag_vs_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL_cluster8-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("8"), 
          width=20, height=10, 
-         isCluster = TRUE, earlyRelapse = FALSE)
+         isCluster = TRUE)
 
 
 # ############################
@@ -1831,55 +1838,55 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 
 # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
 VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("Plasmacytoid DCs"), 
          width=10, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 2. Macrophage cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5
 VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/macrophage-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("Macrophage"), 
          width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("Treg"), 
          width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("Helper T cells"), 
          width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("CTL"), 
          width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 9. NK cells: GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/NK-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/NK-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("NK cells"), 
          width=20, height=10, 
-         isCluster = FALSE, earlyRelapse = TRUE)
+         earlyRelapse = TRUE)
 
 # 3. Treg cluster (cluster 4): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
 VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/Treg_cluster4-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg_cluster4-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("4"), 
          width=20, height=10, 
@@ -1887,7 +1894,7 @@ VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 
 # 5. Helper T cell (cluster 1): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
 VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/HelperT_cluster1-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT_cluster1-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("1"), 
          width=20, height=10, 
@@ -1895,7 +1902,7 @@ VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
 
 # 7. CTL (cluster 8): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
 VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/CTL_cluster8-diag_vs_early_rel", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL_cluster8-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("8"), 
          width=20, height=10, 
@@ -1907,11 +1914,11 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 
 # 1. pDC cluster: GZB, CD163, CD123 (-> IL3RA), HLA-DRB5
 VP_by_gene(gene_list = c("GZMB", "CD163", "IL3RA", "HLA-DRB5"),
-         file_name = "~/Documents/sc_HL_relapse/seurat/figures/LATEST/violin_with_p_vals/pDC-HL_vs_RLN", 
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/pDC-HL_vs_RLN", 
          comp_grps = list(c("HL", "RLN")), 
          cluster_or_cell_types = c("Plasmacytoid DCs"), 
          width=10, height=10, 
-         isCluster = FALSE, earlyRelapse = FALSE, biology = TRUE)
+         biology = TRUE)
 
 ```
 
@@ -1950,49 +1957,51 @@ results <- list(de.V2_vs_V3.celltypes.df,
                 de.refractory_vs_relapse.celltypes.df,
                 de.early_vs_late_relapse.celltypes.df)
 
-i <- 1
 titles <- c("V2 vs. V3", "diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
             "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
-title <- titles[i]
-test.df <- results[[i]]
-
-#split "comparison" column by "_" and take the first split element to be cell_type
-test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
-test.df$group1 <- NULL
-
-LOGFC_CUTOFF = 0.25
-PVAL_CUTOFF = 0.05
-
-keyvals.colour <- ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
-      ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
-             ifelse((abs(test.df$avg_log2FC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
-        'gray32')))
-keyvals.colour[is.na(keyvals.colour)] <- 'black'
-names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
-names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
-names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
-names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
-
-## ------ Enhanced volcano plot ------
-
-p.e <- EnhancedVolcano(test.df,
-    lab = test.df$gene,
-    title = title, subtitle = "",
-    x = 'avg_log2FC',
-    y = 'p_val_adj', 
-    ylim = c(-10, 300), 
-    xlim = c(-2, 2.5),
-    captionLabSize = 0,
-    FCcutoff = LOGFC_CUTOFF,
-    pCutoff = PVAL_CUTOFF,
-    colCustom = keyvals.colour,
-    legendPosition = 'bottom')
 
 setwd("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/volcano")
-pdf(paste("volcano-cell_types-", title, ".pdf", sep = ""), width = 20, height = 11)
-p.e + facet_wrap(~ cell_type, ncol=5) + theme(strip.text.x = element_text(size = 10))
-dev.off()
 
+for (i in 1:length(results)) {
+  title <- titles[i]
+  test.df <- results[[i]]
+  
+  #split "comparison" column by "_" and take the first split element to be cell_type
+  test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
+  test.df$group1 <- NULL
+  
+  LOGFC_CUTOFF = 0.25
+  PVAL_CUTOFF = 0.05
+  
+  keyvals.colour <- ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+        ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+               ifelse((abs(test.df$avg_log2FC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+          'gray32')))
+  keyvals.colour[is.na(keyvals.colour)] <- 'black'
+  names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
+  names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
+  
+  ## ------ Enhanced volcano plot ------
+  
+  p.e <- EnhancedVolcano(test.df,
+      lab = test.df$gene,
+      title = title, subtitle = "",
+      x = 'avg_log2FC',
+      y = 'p_val_adj', 
+      ylim = c(-10, 300), 
+      xlim = c(-2, 2.5),
+      captionLabSize = 0,
+      FCcutoff = LOGFC_CUTOFF,
+      pCutoff = PVAL_CUTOFF,
+      colCustom = keyvals.colour,
+      legendPosition = 'bottom')
+  
+  pdf(paste("volcano-cell_types-", title, ".pdf", sep = ""), width = 20, height = 11)
+  p.e + facet_wrap(~ cell_type, ncol=5) + theme(strip.text.x = element_text(size = 10))
+  dev.off()
+}
 
 ## ------ Custom Enhanced volcano plots ------
 
@@ -2016,7 +2025,7 @@ p.e.0 <- EnhancedVolcano(test.df,
     pointSize = c(ifelse(test.df$gene %in% GOI, 8, 1)),
     labSize = 5.0,
     captionLabSize = 0,
-    x = 'avg_logFC',
+    x = 'avg_log2FC',
     y = 'p_val_adj',
     FCcutoff = LOGFC_CUTOFF,
     pCutoff = PVAL_CUTOFF,
@@ -2026,55 +2035,6 @@ p.e.0 <- EnhancedVolcano(test.df,
 
 p.facets.grid <- p.e.0 + facet_wrap(~ cell_type, ncol=5) +
   theme(strip.text.x = element_text(size = 10))
-
-# for combined volcano plot (all clusters plotted together in one plot), map shapes to cell types
-
-# create custom key-value pairs for different cell-types
-  # this can be achieved with nested ifelse statements
-# keyvals.shape <-  ifelse(test.df$cell_type == 'B and T mix', 14,
-#                   ifelse(test.df$cell_type == 'B cells', 0,
-#                   ifelse(test.df$cell_type == 'B cells, macrophages', 15,
-#                   ifelse(test.df$cell_type == 'CTL', 12,
-#                   ifelse(test.df$cell_type == 'GCB', 3,
-#                   ifelse(test.df$cell_type == 'Helper T cells', 17,       
-#                   ifelse(test.df$cell_type == 'Macrophage', 10, 
-#                   ifelse(test.df$cell_type == 'Naive T cells', 2,
-#                   ifelse(test.df$cell_type == 'NK cells', 4,
-#                   ifelse(test.df$cell_type == 'Treg', 18,
-#                   ifelse(test.df$cell_type == 'Treg proliferation', 8, 
-#                   19)))))))))))
-# 
-# keyvals.shape[is.na(keyvals.shape)] <- 19
-# names(keyvals.shape)[keyvals.shape == 19] <- 'other'
-# names(keyvals.shape)[keyvals.shape == 14] <- 'B and T mix'
-# names(keyvals.shape)[keyvals.shape == 0] <- 'B cells'
-# names(keyvals.shape)[keyvals.shape == 15] <- 'B cells, macrophages'
-# names(keyvals.shape)[keyvals.shape == 12] <- 'CTL'
-# names(keyvals.shape)[keyvals.shape == 3] <- 'GCB'
-# names(keyvals.shape)[keyvals.shape == 17] <- 'Helper T cells'
-# names(keyvals.shape)[keyvals.shape == 10] <- 'Macrophage'
-# names(keyvals.shape)[keyvals.shape == 2] <- 'Naive T cells'
-# names(keyvals.shape)[keyvals.shape == 4] <- 'NK cells'
-# names(keyvals.shape)[keyvals.shape == 18] <- 'Treg'
-# names(keyvals.shape)[keyvals.shape == 8] <- 'Treg proliferation'
-
-## ------ Enhanced volcano plot ------
-
-# previous p-value cutoff: 10e-32; excludes CXCL10 in macrophages
-# p.e <- EnhancedVolcano(test.df,
-#     lab = test.df$gene,
-#     title = title, subtitle = "",
-#     x = 'avg_logFC',
-#     y = 'p_val_adj',
-#     FCcutoff = LOGFC_CUTOFF,
-#     pCutoff = PVAL_CUTOFF,
-#     shapeCustom = keyvals.shape,
-#     colCustom = keyvals.colour,
-#     legendPosition = 'right')
-# 
-# p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=2) +
-#   theme(strip.text.x = element_text(size = 10))
-
 ```
 
 
@@ -2082,8 +2042,11 @@ p.facets.grid <- p.e.0 + facet_wrap(~ cell_type, ncol=5) +
 
 ```{r}
 # define working directory:
-work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/"
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/"
 
+
+de.V2_vs_V3.clusters.df <- read.table(paste(work.dir, "de.V2_vs_V3.clusters.txt", sep = ""), 
+                                         header = TRUE, sep = "\t")
 de.diag_vs_rel.clusters.df <- read.table(paste(work.dir, "de.diag_vs_rel.clusters.txt", sep = ""), 
                                          header = TRUE, sep = "\t")
 de.diag_vs_refractory.clusters.df <- read.table(paste(work.dir, "de.diag_vs_refractory.clusters.txt", sep = ""), 
@@ -2097,54 +2060,61 @@ de.refractory_vs_relapse.clusters.df <- read.table(paste(work.dir, "de.refractor
 de.early_vs_late_relapse.clusters.df <- read.table(paste(work.dir, "de.early_vs_late_relapse.clusters.txt", sep = ""),
                                                    header = TRUE, sep = "\t")
 
-results <- list(de.diag_vs_rel.clusters.df,
-             de.diag_vs_refractory.clusters.df,
-             de.diag_vs_early_relapse.clusters.df,
-             de.diag_vs_late_relapse.clusters.df,
-             de.refractory_vs_relapse.clusters.df,
-             de.early_vs_late_relapse.clusters.df)
+results <- list(de.V2_vs_V3.clusters.df,
+              de.diag_vs_rel.clusters.df,
+              de.diag_vs_refractory.clusters.df,
+              de.diag_vs_early_relapse.clusters.df,
+              de.diag_vs_late_relapse.clusters.df,
+              de.refractory_vs_relapse.clusters.df,
+              de.early_vs_late_relapse.clusters.df)
 
-i <- 1
-titles <- c("diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
+titles <- c("V2 vs. V3", "diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
             "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
-title <- titles[i]
-test.df <- results[[i]]
 
-#split "comparison" column by "_" and take the first split element to be cell_type
-test.df <- separate(data = test.df, col = comparison, into = c("cluster", "group1"), sep = "\\_")
-test.df$group1 <- NULL
-
-LOGFC_CUTOFF = 0.25
-PVAL_CUTOFF = 0.05
-
-keyvals.colour <- ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
-      ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
-             ifelse((abs(test.df$avg_logFC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
-        'gray32')))
-keyvals.colour[is.na(keyvals.colour)] <- 'black'
-names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
-names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
-names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
-names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
-
-## ------ Enhanced volcano plot ------
-
-p.e <- EnhancedVolcano(test.df,
-    lab = test.df$gene,
-    title = title, subtitle = "",
-    x = 'avg_logFC',
-    y = 'p_val_adj', 
-    ylim = c(-12, 300), 
-    xlim = c(-2, 2.8),
-    captionLabSize = 0,
-    FCcutoff = LOGFC_CUTOFF,
-    pCutoff = PVAL_CUTOFF,
-    colCustom = keyvals.colour,
-    legendPosition = 'bottom')
-
-p.facets.grid <- p.e + facet_wrap(~ cluster, ncol=6) +
-  theme(strip.text.x = element_text(size = 10))
-
+for (i in 1:length(results)) {
+  title <- titles[i]
+  test.df <- results[[i]]
+  
+  #split "comparison" column by "_" and take the first split element to be cell_type
+  test.df <- separate(data = test.df, col = comparison, into = c("cluster", "group1"), sep = "\\_")
+  test.df$group1 <- NULL
+  
+  LOGFC_CUTOFF = 0.25
+  PVAL_CUTOFF = 0.05
+  
+  keyvals.colour <- ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+        ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+               ifelse((abs(test.df$avg_log2FC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+          'gray32')))
+  keyvals.colour[is.na(keyvals.colour)] <- 'black'
+  names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
+  names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
+  
+  ## ------ Enhanced volcano plot ------
+  
+  p.e <- EnhancedVolcano(test.df,
+      lab = test.df$gene,
+      title = title, subtitle = "",
+      x = 'avg_log2FC',
+      y = 'p_val_adj', 
+      ylim = c(-12, 300), 
+      xlim = c(-2, 2.8),
+      captionLabSize = 0,
+      FCcutoff = LOGFC_CUTOFF,
+      pCutoff = PVAL_CUTOFF,
+      colCustom = keyvals.colour,
+      legendPosition = 'bottom')
+  p.grid <- p.e + facet_wrap(~ cluster, ncol=6) + theme(strip.text.x = element_text(size = 10))
+  
+  filename <- paste("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/volcano/volcano-clusters-", 
+                    title, ".pdf", sep = "")
+  pdf(filename, width = 20, height = 11)
+  p.grid
+  dev.off()
+  
+}
 
 ## ------ Custom Enhanced volcano plots ------
 
@@ -2170,7 +2140,7 @@ p.e.0 <- EnhancedVolcano(test.df,
     widthConnectors = 0.5,
     pointSize = c(ifelse(test.df$gene %in% GOI, 8, 1)),
     labSize = 5.0,
-    x = 'avg_logFC',
+    x = 'avg_log2FC',
     y = 'p_val_adj',
     xlim = c(-1, 1),
     ylim = c(0, 50),
@@ -2192,7 +2162,7 @@ p.e.1 <- EnhancedVolcano(test.df,
     drawConnectors = TRUE,
     xlim = c(-2,2.5),
     labSize = 6.0,
-    x = 'avg_logFC',
+    x = 'avg_log2FC',
     y = 'p_val_adj',
     FCcutoff = LOGFC_CUTOFF,
     pCutoff = PVAL_CUTOFF,
@@ -2208,7 +2178,7 @@ p.e.2 <- EnhancedVolcano(test.df,
     drawConnectors = TRUE,
     #xlim = c(-2,2.5),
     labSize = 6.0,
-    x = 'avg_logFC',
+    x = 'avg_log2FC',
     y = 'p_val_adj',
     FCcutoff = LOGFC_CUTOFF,
     pCutoff = PVAL_CUTOFF,
