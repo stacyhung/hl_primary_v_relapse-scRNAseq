@@ -766,7 +766,7 @@ hl.macrophage_pDC.components.cluster.avgs.ordered <- hl.macrophage_pDC.component
 ref_name <- "Monaco" # 5 x 10
 
 pdf(paste("heatmap-macrophage_pDC-", ref_name, "-component_markers-avg_expr_per_celltype.pdf", sep = ""), 
-    width = 4.75, height = 10)
+    width = 5, height = 10)
 pheatmap(hl.macrophage_pDC.components.cluster.avgs.ordered, 
          annotation_row = component.mappings,
          cluster_rows = FALSE, 
@@ -1560,6 +1560,7 @@ p.temp <- VlnPlot(hl_all.combined, features = c("JUND"),
 ## Visualize V2 vs V3 differences
 
 ```{r}
+Idents(hl_all.combined) <- hl_all.combined$chemistry
 
 # read in data
 v2_v_v3.de <- read.table("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/de.V2_v_V3.txt", sep = "\t", header = TRUE)
@@ -1567,17 +1568,27 @@ v2_v_v3.de <- read.table("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_a
 # extract features that have log2FC < -0.5 and adjusted p-value <= 0.001
 v2_v_v3.de.sig <- filter(v2_v_v3.de, v2_v_v3.de$avg_log2FC < -0.5 & v2_v_v3.de$p_val_adj <= 0.001)
 v2_v_v3.de.sig_genes <- unique(v2_v_v3.de.sig$gene)
+write.table(v2_v_v3.de.sig_genes, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/v2_v_v3.de.sig_genes.txt", row.names = FALSE, quote = FALSE)
 
 # violin plot for each feature showing each sample coloured by chemistry
-p <- VlnPlot(hl_all.combined, features = v2_v_v3.de.sig_genes,
+pdf("VlnPlot-genes_up_in_V3_vs_V2.pdf", width = 40, height = 60)
+VlnPlot(hl_all.combined, features = v2_v_v3.de.sig_genes,
                          split.by = "chemistry", group.by = "orig.ident",
                          log = FALSE, pt.size = 0, ncol = 4, 
                          assay = "RNA", slot = "data") + xlab("")
+dev.off()
+
+sig_genes.GOI <- c("JUND", "ATM", "PTEN", "ARID1B", "KMT2A", "CD81")
+pdf("VlnPlot-GOI_up_in_V3_vs_V2.pdf", width = 24, height = 16)
+VlnPlot(hl_all.combined, features = sig_genes.GOI,
+                         split.by = "chemistry", group.by = "orig.ident",
+                         log = FALSE, pt.size = 0, ncol = 2, 
+                         assay = "RNA", slot = "data") + xlab("")
+dev.off()
 
 # get features that have less than 0.5 FC increase in V3 --> ~800 features
-v2_v_v3.de.low_sig <- filter(v2_v_v3.de, v2_v_v3.de$avg_log2FC > -0.5 & v2_v_v3.de$avg_log2FC < -0.25 &
-                           v2_v_v3.de$p_val_adj <= 0.001)
-
+# v2_v_v3.de.low_sig <- filter(v2_v_v3.de, v2_v_v3.de$avg_log2FC > -0.5 & v2_v_v3.de$avg_log2FC < -0.25 &
+                           # v2_v_v3.de$p_val_adj <= 0.001)
 ```
 
 ## Violin plots with statistical bars
@@ -1914,8 +1925,10 @@ library(plyr)
 library(tidyr) # separate
 
 # define working directory:
-work.dir <- "~/Documents/sc_HL_relapse/seurat/output/LATEST/DE_analysis/min_3_cells_per_group/"
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/"
 
+de.V2_vs_V3.celltypes.df <- read.table(paste(work.dir, "de.V2_vs_V3.cell_types.txt", sep = ""), 
+                                         header = TRUE, sep = "\t")
 de.diag_vs_rel.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_rel.cell_types.txt", sep = ""), 
                                          header = TRUE, sep = "\t")
 de.diag_vs_refractory.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_refractory.cell_types.txt", sep = ""), 
@@ -1929,15 +1942,16 @@ de.refractory_vs_relapse.celltypes.df <- read.table(paste(work.dir, "de.refracto
 de.early_vs_late_relapse.celltypes.df <- read.table(paste(work.dir, "de.early_vs_late_relapse.cell_types.txt", sep = ""),
                                                    header = TRUE, sep = "\t")
 
-results <- list(de.diag_vs_rel.celltypes.df,
-             de.diag_vs_refractory.celltypes.df,
-             de.diag_vs_early_relapse.celltypes.df,
-             de.diag_vs_late_relapse.celltypes.df,
-             de.refractory_vs_relapse.celltypes.df,
-             de.early_vs_late_relapse.celltypes.df)
+results <- list(de.V2_vs_V3.celltypes.df,
+                de.diag_vs_rel.celltypes.df,
+                de.diag_vs_refractory.celltypes.df,
+                de.diag_vs_early_relapse.celltypes.df,
+                de.diag_vs_late_relapse.celltypes.df,
+                de.refractory_vs_relapse.celltypes.df,
+                de.early_vs_late_relapse.celltypes.df)
 
-i <- 6
-titles <- c("diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
+i <- 1
+titles <- c("V2 vs. V3", "diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
             "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
 title <- titles[i]
 test.df <- results[[i]]
@@ -1949,9 +1963,9 @@ test.df$group1 <- NULL
 LOGFC_CUTOFF = 0.25
 PVAL_CUTOFF = 0.05
 
-keyvals.colour <- ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
-      ifelse((abs(test.df$avg_logFC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
-             ifelse((abs(test.df$avg_logFC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+keyvals.colour <- ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+      ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+             ifelse((abs(test.df$avg_log2FC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
         'gray32')))
 keyvals.colour[is.na(keyvals.colour)] <- 'black'
 names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
@@ -1964,7 +1978,7 @@ names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
 p.e <- EnhancedVolcano(test.df,
     lab = test.df$gene,
     title = title, subtitle = "",
-    x = 'avg_logFC',
+    x = 'avg_log2FC',
     y = 'p_val_adj', 
     ylim = c(-10, 300), 
     xlim = c(-2, 2.5),
@@ -1974,8 +1988,10 @@ p.e <- EnhancedVolcano(test.df,
     colCustom = keyvals.colour,
     legendPosition = 'bottom')
 
-p.facets.grid <- p.e + facet_wrap(~ cell_type, ncol=5) +
-  theme(strip.text.x = element_text(size = 10))
+setwd("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/volcano")
+pdf(paste("volcano-cell_types-", title, ".pdf", sep = ""), width = 20, height = 11)
+p.e + facet_wrap(~ cell_type, ncol=5) + theme(strip.text.x = element_text(size = 10))
+dev.off()
 
 
 ## ------ Custom Enhanced volcano plots ------
