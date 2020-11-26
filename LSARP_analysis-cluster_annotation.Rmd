@@ -1,0 +1,487 @@
+---
+title: "LSARP_analysis-cluster_annotation"
+author: "Stacy Hung"
+date: "25/11/2020"
+output: html_document
+---
+
+## Subcluster macrophage / pDC cluster
+
+```{r}
+library(Seurat)
+
+DefaultAssay(hl.macrophage_pDC) <- "integrated"
+hl.macrophage_pDC <- FindNeighbors(hl.macrophage_pDC, reduction = "pca", dims = 1:30)
+hl.macrophage_pDC.subclustered <- FindClusters(hl.macrophage_pDC, resolution = 0.4)
+
+Idents(hl.macrophage_pDC.subclustered) <- hl.macrophage_pDC.subclustered$seurat_clusters
+
+# plot umap
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/umap-macrophage_pDC-subclusters.pdf", width = 6, height = 5)
+DimPlot(hl.macrophage_pDC.subclustered, reduction = "umap", label = TRUE) 
+dev.off()
+
+# plot average expression heatmap for component markers
+avgComponentExpressionHeatmap(data = hl.macrophage_pDC.subclustered)
+# plot individual expression heatmaps for each cluster
+printSCHeatmapsPerCluster(data = hl.macrophage_pDC.subclustered, 
+                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/subclustering/")
+# attach manual annotations
+hl.macrophage_pDC.subclustered <- RenameIdents(hl.macrophage_pDC.subclustered,
+                                `0` = "pDC",
+                                `1` = "macrophage",
+                                `2` = "macrophage",
+                                `3` = "pDC",
+                                `4` = "macrophage")
+hl.macrophage_pDC.subclustered$celltype2 <- Idents(hl.macrophage_pDC.subclustered)
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/umap-macrophage_pDC-subclusters-annotated.pdf", width = 6, height = 5)
+DimPlot(hl.macrophage_pDC.subclustered, reduction = "umap", label = TRUE) 
+dev.off()
+
+saveRDS(hl.macrophage_pDC.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.macrophage_pDC.subclustered.annotated.rds")
+```
+
+## DE analysis
+
+```{r}
+library(MAST)
+
+work_dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/macrophage_pDC_cluster/"
+
+# diagnostic vs. relapse
+hl.macrophage_pDC.subclustered$comparator <- paste(hl.macrophage_pDC.subclustered$celltype2,
+                                                       hl.macrophage_pDC.subclustered$case.type, sep = "_")
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_RLN", 
+               file_name = "de.diag_vs_rel.cell_types.txt")
+
+# diagnostic vs. refractory
+hl.macrophage_pDC.subclustered$comparator <- paste(hl.macrophage_pDC.subclustered$celltype2,
+                                                   hl.macrophage_pDC.subclustered$refractory, sep = "_")
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_(relapseNotRefractory|RLN)", 
+               file_name = "de.diag_vs_refractory.cell_types.txt")
+
+# refractory vs. relapse
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_(diagnostic|RLN)", 
+               file_name = "de.refractory_vs_relapse.cell_types.txt")
+
+# diagnostic vs. early relapse
+hl.macrophage_pDC.subclustered$comparator <- paste(hl.macrophage_pDC.subclustered$celltype2,
+                                                   hl.macrophage_pDC.subclustered$earlyRelapse, sep = "_")
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_(lateRelapse|RLN)", 
+               file_name = "de.diag_vs_early_relapse.cell_types.txt")
+
+# diagnostic vs. late relapse
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_(earlyRelapse|RLN)", 
+               file_name = "de.diag_vs_late_relapse.cell_types.txt")
+
+# early vs. late relapse
+writeDEresults(data = hl.macrophage_pDC.subclustered, 
+               grep_string = "_(diagnostic|RLN)", 
+               file_name = "de.early_vs_late_relapse.cell_types.txt")
+
+```
+
+## Volcano plots
+
+```{r}
+library(EnhancedVolcano)
+library(ggplot2)
+library(dplyr)
+library(plyr)
+library(tidyr) # separate
+
+# define working directory:
+work.dir <- "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/DE_analysis/macrophage_pDC_cluster/"
+
+de.diag_vs_rel.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_rel.cell_types.txt", sep = ""), 
+                                         header = TRUE, sep = "\t")
+de.diag_vs_refractory.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_refractory.cell_types.txt", sep = ""), 
+                                                header = TRUE, sep = "\t")
+de.diag_vs_early_relapse.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_early_relapse.cell_types.txt", sep = ""), 
+                                                   header = TRUE, sep = "\t")
+de.diag_vs_late_relapse.celltypes.df <- read.table(paste(work.dir, "de.diag_vs_late_relapse.cell_types.txt", sep = ""),
+                                                  header = TRUE, sep = "\t")
+de.refractory_vs_relapse.celltypes.df <- read.table(paste(work.dir, "de.refractory_vs_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+de.early_vs_late_relapse.celltypes.df <- read.table(paste(work.dir, "de.early_vs_late_relapse.cell_types.txt", sep = ""),
+                                                   header = TRUE, sep = "\t")
+
+results <- list(de.diag_vs_rel.celltypes.df,
+                de.diag_vs_refractory.celltypes.df,
+                de.diag_vs_early_relapse.celltypes.df,
+                de.diag_vs_late_relapse.celltypes.df,
+                de.refractory_vs_relapse.celltypes.df,
+                de.early_vs_late_relapse.celltypes.df)
+
+titles <- c("diagnostic vs. relapse", "diagnostic vs. refractory", "diagnostic vs. early relapse",
+            "diagnostic vs. late relapse", "refractory vs. relapse", "early vs. late relapse")
+
+dir <- "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/volcano/macrophage_pDC_subcluster/"
+
+for (i in 1:length(results)) {
+  title <- titles[i]
+  test.df <- results[[i]]
+  
+  #split "comparison" column by "_" and take the first split element to be cell_type
+  test.df <- separate(data = test.df, col = comparison, into = c("cell_type", "group1"), sep = "\\_")
+  test.df$group1 <- NULL
+  
+  LOGFC_CUTOFF = 0.25
+  PVAL_CUTOFF = 0.05
+  
+  keyvals.colour <- ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'firebrick3',
+        ifelse((abs(test.df$avg_log2FC) > LOGFC_CUTOFF & test.df$p_val_adj >= PVAL_CUTOFF), 'forestgreen',
+               ifelse((abs(test.df$avg_log2FC) < LOGFC_CUTOFF & test.df$p_val_adj < PVAL_CUTOFF), 'dodgerblue3',
+          'gray32')))
+  keyvals.colour[is.na(keyvals.colour)] <- 'black'
+  names(keyvals.colour)[keyvals.colour == 'firebrick3'] <- 'q-val < 0.05; |logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'forestgreen'] <- '|logFC| > 0.25'
+  names(keyvals.colour)[keyvals.colour == 'dodgerblue3'] <- 'q-val < 0.05'
+  names(keyvals.colour)[keyvals.colour == 'gray32'] <- 'unsignificant'
+  
+  ## ------ Enhanced volcano plot ------
+  
+  p.e <- EnhancedVolcano(test.df,
+      lab = test.df$gene,
+      title = title, subtitle = "",
+      x = 'avg_log2FC',
+      y = 'p_val_adj', 
+      ylim = c(-1, 15), 
+      xlim = c(-3, 3),
+      captionLabSize = 0,
+      FCcutoff = LOGFC_CUTOFF,
+      pCutoff = PVAL_CUTOFF,
+      colCustom = keyvals.colour,
+      legendPosition = 'bottom')
+  
+  pdf(paste(dir, "volcano-cell_types-", title, ".pdf", sep = ""), width = 6, height = 6)
+  p.e + facet_wrap(~ cell_type, ncol=5) + theme(strip.text.x = element_text(size = 10))
+  dev.off()
+}
+```
+
+## Violin plots
+
+```{r}
+# diagnostic vs. relapse
+Idents(hl.macrophage_pDC.subclustered) <- hl.macrophage_pDC.subclustered$celltype2
+
+# macrophage
+VP_by_gene(data = hl.macrophage_pDC.subclustered,
+           gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC_subcluster/macrophage-diag_vs_rel",
+         comp_grps = list(c("diagnostic", "relapse")),
+         cluster_or_cell_types = c("macrophage"),
+         width=20, height=10)
+
+# pDC
+VP_by_gene(data = hl.macrophage_pDC.subclustered,
+           gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC_subcluster/pDC-diag_vs_rel",
+         comp_grps = list(c("diagnostic", "relapse")),
+         cluster_or_cell_types = c("pDC"),
+         width=20, height=10)
+
+# diagnostic vs. early relapse
+
+# macrophage
+VP_by_gene(data = hl.macrophage_pDC.subclustered,
+           gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC_subcluster/macrophage-diag_vs_early_rel",
+         comp_grps = list(c("diagnostic", "earlyRelapse")),
+         cluster_or_cell_types = c("macrophage"),
+         width=20, height=10, 
+         earlyRelapse = TRUE)
+
+# pDC
+VP_by_gene(data = hl.macrophage_pDC.subclustered,
+           gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC_subcluster/pDC-diag_vs_early_rel",
+         comp_grps = list(c("diagnostic", "earlyRelapse")),
+         cluster_or_cell_types = c("pDC"),
+         width=20, height=10, 
+         earlyRelapse = TRUE)
+
+
+```
+
+# Generate violin plots for a given set of genes looking at a specific cell type / cluster and comparison
+
+Parameters:
+  - data: Seurat object with identities set to appropriate cell types or clusters
+  - file_name: file prefix (including folder path)
+  - comp_grps: list of DE groups to include
+  - cluster_or_cell_types: list of cell types (or clusters) to plot data for
+  - width: width of plot
+  - height: height of plot
+
+```{r}
+VP_by_gene <- function(data,
+                       gene_list, 
+                       file_name, 
+                       comp_grps, 
+                       cluster_or_cell_types, 
+                       width, 
+                       height, 
+                       earlyRelapse = FALSE){
+  
+  data.df <- NULL
+  expr.df <- NULL
+
+  plot_one_gene <- function(gene){
+    
+    # Step 1: create expr.df dataset (contains columns: expr, case, celltype/cluster, mean_expr)
+      
+    # Get the expression data
+    if (earlyRelapse) {
+      data.df <- data.frame(expr = data[["RNA"]]@data[gene,], 
+                              case = data$earlyRelapse, 
+                              celltype = data$celltype2)
+    } else {
+      data.df <- data.frame(expr = data[["RNA"]]@data[gene,], 
+                              case = data$case.type, 
+                              celltype = data$celltype2)
+    }
+    expr.df <- data.df %>% filter(celltype %in% cluster_or_cell_types, case %in% comp_grps[[1]])
+
+    # Step 2: Calculate mean / median
+    expr.df <- as.data.frame(expr.df %>%
+        select(expr, case) %>%
+        group_by(case) %>%
+        mutate(mean_expr = mean(expr)))
+
+    # Step 3: Plot (note that we are using the Wilcoxon-rank-sum test (deals with smaller numbers better))
+    ggplot(expr.df, aes(x = case, y = expr)) + 
+      geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+      #scale_y_continuous(trans='log2') +
+      # Add 10% space on the y-axis above the box plots
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      stat_compare_means(comparisons = comp_grps, label = "p.format") +
+      stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.1) +
+      xlab("") + ylab("") + ggtitle(gene) +
+      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)) +
+      theme(axis.text = element_text(size = 12))
+    
+  }
+  purrr::map(gene_list, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
+  file_name <- paste(file_name, ".png", sep = "")
+  ggsave(file_name, width = width, height = height)
+}
+```
+
+## Create heatmap of average expression of clusters across component markers
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+
+```{r}
+avgComponentExpressionHeatmap <- function(data) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get average expression of each gene
+  cluster.averages <- AverageExpression(data, features = markers.to.plot, return.seurat = TRUE)
+  data.avg <- GetAssayData(object = cluster.averages, slot = "scale.data")
+  # now match component gene list to those being plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  rownames(component.mappings) <- component.mappings$Gene
+  # order by component then gene name so heatmap legend makes sense
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  component.mappings$Gene <- NULL
+  component.mappings$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.avg.ordered <- data.avg[match(rownames(components.ordered), rownames(data.avg)), ]
+
+  # heatmap of average expression per cluster across all component genes
+  p <- pheatmap(hl.subclustered.components.cluster.avgs.ordered, 
+         annotation_row = component.mappings,
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         angle_col = 45, 
+         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), border_color = NA)
+  # rotated version of heatmap
+  p.rotated <- pheatmap(t(hl.subclustered.components.cluster.avgs.ordered), 
+         annotation_col = component.mappings,
+         cluster_cols = FALSE, 
+         annotation_names_col = FALSE, 
+         gaps_col = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
+         angle_col = 45, 
+         border_color = NA)
+}
+
+```
+
+## Produce single-cell level heatmaps of expression for EACH cluster
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+  - plot_folder: absolute path of folder to print heatmaps to
+
+```{r}
+printSCHeatmapsPerCluster <- function(data, plot_folder) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get total number of clusters
+  NUM_CLUSTERS = length(unique(data$seurat_clusters))
+  # get expression matrix (features by barcodes)
+  data.expr <- data@assays$SCT@data
+  # retrieve expression for each cell across the component genes of interest
+  data.expr.markers <- data.expr[ rownames(data.expr) %in% markers.to.plot , ]
+  # match component gene list to those that can be plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  # order by component then gene name so that the heatmap legend makes sense
+  rownames(component.mappings) <- component.mappings$Gene
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  components.ordered$Gene <- NULL
+  components.ordered$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.expr.markers.ordered <- data.expr.markers[ row.names(components.ordered), ]
+  # to create separate expr matrices for each cluster, need mappings for cell --> cluster
+  data.clusters <- data$seurat_clusters
+  # convert to char
+  clusters.char <- levels(data.clusters)[data.clusters] # ordered vector of cluster ids (0 through 26)
+  barcodes.cluster <- attributes(data.clusters)$names # ordered vector of barcodes (76,607 unique entries)
+  clusters.df <- data.frame(barcodes.cluster, clusters.char)
+ 
+  expr.markers <- vector('list', NUM_CLUSTERS)
+  heatmaps <- vector('list', NUM_CLUSTERS)
+  hl.seurat <- vector('list', NUM_CLUSTERS)
+  
+  for (c in 1:NUM_CLUSTERS) {
+    hl.seurat[[c]] <- subset(data, idents = c-1) # filter by cluster
+    hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot) # filter by genes
+    
+    # retrieve expression for each cell across the component genes of interest
+    expr.temp <- hl.seurat[[c]]@assays$SCT@data
+    expr.markers[[c]] <- expr.temp[ rownames(expr.temp) %in% markers.to.plot , ]
+    
+    # reorder expression matrix to match component mappings
+    expr.markers[[c]] <- expr.markers[[c]][ row.names(components.ordered), ]
+  
+    filename <- paste(plot_folder, "heatmap-cluster", 
+                      c-1, ".pdf", sep = "")
+    pdf(filename, width = 8, height = 8)
+    heatmaps[[c]] <- pheatmap(expr.markers[[c]], 
+           annotation_row = components.ordered, 
+           cluster_rows = FALSE, 
+           annotation_names_row = FALSE, 
+           angle_col = 45, 
+           gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
+           border_color = NA, show_colnames = FALSE, scale = "none")
+    dev.off()
+  }
+ 
+}
+```
+
+## Perform DE analysis on all pairs
+
+Parameters:
+  - data: Seurat object
+  - grep_string: grep string representing comparators to exclude
+  - file_name: name of file within working directory
+
+```{r}
+# prepare data for DE analysis, run the DE analysis, and write the results to output
+writeDEresults <- function(data, grep_string, file_name ) {
+  Idents(data) <- data$comparator
+  # get the comparators
+  comparators <- sort(unique(data$comparator))
+  # store number of cells for each comparator
+  cell_counts.df <- as.data.frame(table(data$comparator))
+  # remove cases not of interest
+  comparators <- comparators[ !grepl(grep_string, comparators)]
+  # perform DE analysis, where odd indices = group1 (e.g. diagnostic) and even indices = group2 (e.g. relapse)
+  de.results <- get_de_genes(data = data, 
+                             comparators = comparators, 
+                             de.test = "MAST", 
+                             cell_counts.df = cell_counts.df)
+  de.results.df <- merge_de_results(de.results)
+  write.table(de.results.df, paste(work_dir, file_name, sep=""), sep = "\t", quote = FALSE, row.names = FALSE)
+}
+
+# function to find DE genes between all pairs
+get_de_genes <- function(data, comparators, de.test, cell_counts.df) {
+  
+  # get list of comparators that have fewer than 100 cells
+  cell_counts.df <- cell_counts.df[ cell_counts.df$Var1 %in% comparators, ] # only look at comparators of interest
+  low_cell_counts.comparators <- cell_counts.df[ cell_counts.df$Freq < 3, ]$Var1
+  
+  NUM_CLUSTERS = length(comparators) / 2
+  # de_results <- vector('list', NUM_CLUSTERS)
+  de_results <- list()
+
+  for (i in 1:NUM_CLUSTERS) {
+    index.grp1 <- (i*2)-1
+    index.grp2 <- i*2
+    
+    # check that both grp1 and grp2 are NOT in the low cell counts list
+    if ( !(comparators[index.grp1] %in% low_cell_counts.comparators) && 
+         !(comparators[index.grp2] %in% low_cell_counts.comparators)) {
+      
+        # slot = "data" (normalized counts)
+        tempResults <- FindMarkers(data, assay = "RNA", slot = "data",
+                                   ident.1 = comparators[index.grp1], 
+                                   ident.2 = comparators[index.grp2], 
+                                   test.use = de.test, 
+                                   latent.vars = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+                                   min.pct = 0.25, 
+                                   logfc.threshold = 0)
+        # make gene a column
+        tempResults$gene <- rownames(tempResults)
+        # add comparison description as a column
+        tempResults$comparison <- paste(comparators[index.grp1], "_VS_", comparators[index.grp2], sep = "")
+        rownames(tempResults) <- NULL
+        # change order of columns
+        cols <- c("comparison", "gene", "p_val", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")
+        tempResults <- tempResults[ cols ]
+        # sort by descending fold change
+        tempResults <- tempResults[order(-tempResults$avg_log2FC), ]
+        # filter out non-interesting genes (i.e. *orf*, ^RP, and ^MT- genes)
+        tempResults <- tempResults[ !(grepl("(^RP)|(MT-)|(*orf*)", tempResults$gene)), ]
+        # remove results that have an adjusted p-value of 1
+        tempResults <- dplyr::filter(tempResults, tempResults$p_val_adj < 1)
+        
+        # !!! NB: this step will fail if tempResults is empty (e.g. all adjusted p-values are 1)
+        # store the processed results in the final result array
+        if (nrow(tempResults) > 0) {
+          de_results[[unique(tempResults$comparison)]] <- tempResults  
+        }
+      }
+  }
+  return(de_results)
+}
+
+# function to merge results into single dataframe
+merge_de_results <- function(results.vector) {
+  # initialize dataframe
+  merged.df <- data.frame(comparison = character(),
+                          gene = character(),
+                          p_val = double(),
+                          avg_logFC = double(),
+                          pct.1 = double(),
+                          pct.2 = double(),
+                          p_val_adj = double())
+  
+  NUM_CLUSTERS = length(results.vector)
+  for (i in 1:NUM_CLUSTERS) {
+    merged.df <- rbind(merged.df, results.vector[[i]])
+  }
+  return(merged.df)
+}
+```
+
