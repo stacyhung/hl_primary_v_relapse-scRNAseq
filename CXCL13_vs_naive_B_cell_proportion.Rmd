@@ -1,0 +1,506 @@
+---
+title: "CXCL13_expr_vs_Naive_B_cell_proportion"
+author: "Stacy Hung"
+date: "27/11/2020"
+output: html_document
+---
+
+## Examine correlation between CXCL13 + B-cell proportion
+
+```{r}
+library(ggrepel)
+library(ggpubr)
+
+genes <- c("CXCR5", "CXCL13")
+
+# extract CXCL13 expression with case ids
+
+# get expression matrix (features by barcodes)
+data.expr <- hl_all.combined@assays$SCT@data
+# retrieve expression for each cell across the component gene(s) of interest
+data.expr.CXCL13.df <- as.data.frame(data.expr[ rownames(data.expr) == "CXCL13", ])
+# extract case ids
+data.ids.df <- as.data.frame(hl_all.combined$orig.ident)
+# combined expression and case ids
+data.expr.merged <- cbind(data.expr.CXCL13.df, data.ids.df)
+colnames(data.expr.merged) <- c("CXCL13_expr", "sample_id")
+
+# Alternatively, get average expression of CXCL13 on helper T cells and CXCR5 on naive B cells
+
+# CXCL13 on helper T
+hl.helperT <- subset(x = hl_all.combined, subset = celltype == "T helper")
+Idents(hl.helperT) <- hl.helperT$orig.ident
+sample_avgs.CXCL13.obj <- AverageExpression(hl.helperT, 
+                                      features = c("CXCL13"),
+                                      return.seurat = TRUE)
+sample_avgs.CXCL13.expr <- as.data.frame(t(GetAssayData(object = sample_avgs.CXCL13.obj, slot = "scale.data")))
+sample_avgs.CXCL13.expr$sample_id <- rownames(sample_avgs.CXCL13.expr)
+
+# CXCR5 on naive B
+hl.naiveB <- subset(x = hl_all.combined, subset = celltype == "Naive B cell")
+Idents(hl.naiveB) <- hl.naiveB$orig.ident
+sample_avgs.CXCR5.obj <- AverageExpression(hl.naiveB, 
+                                      features = c("CXCR5"),
+                                      return.seurat = TRUE)
+sample_avgs.CXCR5.expr <- as.data.frame(t(GetAssayData(object = sample_avgs.CXCR5.obj, slot = "scale.data")))
+sample_avgs.CXCR5.expr$sample_id <- rownames(sample_avgs.CXCR5.expr)
+
+# get proportion of naive B cells
+sample.celltype_num <- as.data.frame(table(hl_all.combined$orig.ident, hl_all.combined$celltype))
+colnames(sample.celltype_num) <- c("sample_id", "cell_identity", "num_cells")
+
+# order by proportion of naive B cells
+sample.celltype_num <- sample.celltype_num %>% 
+  dplyr::group_by(sample_id) %>% dplyr::mutate(total_cells = sum(as.numeric(num_cells)))
+sample.celltype_num <- as.data.frame(sample.celltype_num %>% dplyr::mutate(proportion = as.numeric(num_cells) / total_cells))
+# get order of samples by focusing only on proportion of naive B cells
+temp <- subset(sample.celltype_num, 
+               sample.celltype_num$cell_identity == "Naive B cell")
+temp <- temp[ order(temp$cell_identity, -temp$proportion) , ]
+# set the order in the full dataframe
+sample.celltype_num$sample_id <- factor(sample.celltype_num$sample_id, levels = temp$sample_id)
+# filter for just B-cells
+sample.celltype_num <- subset(sample.celltype_num, sample.celltype_num$cell_identity == "Naive B cell")
+
+# merge expression data with case level B-cell proportions
+data.merged <- merge(data.expr.merged, sample.celltype_num, by="sample_id")
+# order by increasing proportion
+data.merged <- data.merged[order(data.merged$proportion), ]
+data.merged$proportion <- factor(data.merged$proportion, levels=unique(data.merged$proportion))
+data.merged$sample_id <- factor(data.merged$sample_id, levels=unique(data.merged$sample_id))
+
+# and bind the averages to Naive B cell proportions
+avg_expr.merged <- merge(sample_avgs.CXCL13.expr, sample_avgs.CXCR5.expr, by="sample_id")
+avg_expr.merged <- merge(sample.celltype_num, avg_expr.merged, by="sample_id")
+
+# map case type
+avg_expr.merged$case_type <- plyr::mapvalues(
+  x = avg_expr.merged$sample_id,
+  from = as.character(final.cohort$Sample),
+  to = as.character(final.cohort$case.type)
+)
+
+# remove RLN cases
+avg_expr.merged.HL <- subset(avg_expr.merged, avg_expr.merged$case_type %in% c("diagnostic", "relapse"))
+avg_expr.merged.relapse <- subset(avg_expr.merged, avg_expr.merged$case_type %in% c("relapse"))
+
+# scatter plot of proportion by avg expr, with points coloured by case type
+p1 <- ggplot(avg_expr.merged, aes(x = proportion, y = CXCL13, color=case_type, label = sample_id)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Naive B cell proportion") + 
+  ylab("Mean CXCL13 expression on Helper T cells")
+  # geom_text_repel(aes(label=sample_id))
+
+# scatter plot of proportion by avg expr, with trend line and R square value + formula
+p2 <- ggplot(avg_expr.merged, aes(x = proportion, y = CXCL13)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Naive B cell proportion") + 
+  ylab("Mean CXCL13 expression on Helper T cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.62, label.y = 1.5) +
+  stat_regline_equation(label.x = 0.62, label.y = 1.32)
+
+grid.arrange(p1, p2, ncol=2)
+
+# scatter plot of proportion by avg expr, with points coloured by case type
+p3 <- ggplot(avg_expr.merged.relapse, aes(x = proportion, y = CXCL13, color=case_type, label = sample_id)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Naive B cell proportion") + 
+  ylab("Mean CXCL13 expression on Helper T cells")
+  # geom_text_repel(aes(label=sample_id))
+
+# scatter plot of proportion by avg expr, with trend line and R square value + formula
+p4 <- ggplot(avg_expr.merged.relapse, aes(x = proportion, y = CXCL13)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Naive B cell proportion") + 
+  ylab("Mean CXCL13 expression on Helper T cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.62, label.y = 1.5) +
+  stat_regline_equation(label.x = 0.62, label.y = 1.32)
+
+grid.arrange(p3, p4, ncol=2)
+
+# boxplot of CXCL13 expression, sorted by increasing B-cell proportions
+p3 <- ggplot(data.merged, aes(x=sample_id, y=CXCL13_expr)) + 
+  geom_boxplot(outlier.shape = NA) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+# violin plot
+p4 <- ggplot(data.merged, aes(x=sample_id, y=CXCL13_expr)) + 
+  geom_violin(size = 0.1) +
+  theme(axis.text.x = element_text(angle = 90)) + xlab("") +
+  geom_jitter(size = 0.1, shape=16, position=position_jitter(0.2))
+
+```
+
+## Visualize CXCL13 expression for helper t cells 
+
+```{r}
+# CXCL13 on helper T
+helperT.averages <- AverageExpression(hl.helperT, 
+                                      features = c("CXCL13"),
+                                      return.seurat = TRUE)
+helperT.avg.expr <- as.data.frame(t(GetAssayData(object = helperT.averages, slot = "scale.data")))
+helperT.avg.expr$sample_id <- rownames(helperT.avg.expr)
+
+# CXCR5 on naive B
+naiveB.averages <- AverageExpression(hl.naiveB, 
+                                      features = c("CXCR5"),
+                                      return.seurat = TRUE)
+naiveB.avg.expr <- as.data.frame(t(GetAssayData(object = naiveB.averages, slot = "scale.data")))
+naiveB.avg.expr$sample_id <- rownames(naiveB.avg.expr)
+
+# extract expression data for CXCL13 on T-helper cells
+CXCL13.expr.df <- data.frame(CXCL13 = hl.helperT[["RNA"]]@data["CXCL13",], 
+                      sample_id = hl.helperT$orig.ident,
+                      case_type = hl.helperT$case.type)
+
+# order by increasing avg expression
+helperT.avg.expr <- helperT.avg.expr[order(-helperT.avg.expr$CXCL13), ]
+
+CXCL13.expr.df$sample_id <- factor(CXCL13.expr.df$sample_id,
+                                   levels=unique(helperT.avg.expr$sample_id))
+
+# plot
+p1 <- ggplot(CXCL13.expr.df, aes(x = sample_id, y = CXCL13)) + 
+  geom_violin(aes(fill=case_type), trim=TRUE, scale = "width") + geom_jitter(size=0.1) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("CXCL13 expression in Helper T cells") +
+  scale_fill_manual(values=c("relapse"="lightcoral", 
+                       "diagnostic"="cornflowerblue",
+                       "RLN"="gray40"))
+
+# extract expression data for CXCR5 on naive B cells
+CXCR5.expr.df <- data.frame(CXCR5 = hl.naiveB[["RNA"]]@data["CXCR5",], 
+                      sample_id = hl.naiveB$orig.ident,
+                      case_type = hl.naiveB$case.type)
+# order by increasing avg expression
+naiveB.avg.expr <- naiveB.avg.expr[order(-naiveB.avg.expr$CXCR5), ]
+
+CXCR5.expr.df$sample_id <- factor(CXCR5.expr.df$sample_id,
+                                   levels=unique(naiveB.avg.expr$sample_id))
+
+# plot
+p2 <- ggplot(CXCR5.expr.df, aes(x = sample_id, y = CXCR5)) + 
+  geom_violin(aes(fill=case_type), trim=TRUE, scale = "width") + geom_jitter(size=0.1) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("CXCR5 expression in naive B cells") +
+  scale_fill_manual(values=c("relapse"="lightcoral", 
+                       "diagnostic"="cornflowerblue",
+                       "RLN"="gray40"))
+
+grid.arrange(p1, p2, n=1)
+```
+
+## *CXCR5* expression on *naive B cells* in (1) diagnostic vs. relapse and (2) diagnostic vs. early relapse
+
+```{r}
+# diagnostic vs. relapse
+VP_by_gene(gene_list = c("CXCR5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CXCL13_vs_naive_B_cells/CXCR5_NaiveBcell-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("Naive B cell"), 
+         width=6, height=4)
+
+# diagnostic vs. early relapse
+VP_by_gene(gene_list = c("CXCR5"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CXCL13_vs_naive_B_cells/CXCR5_NaiveBcell-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("Naive B cell"), earlyRelapse = TRUE,
+         width=6, height=4)
+
+```
+
+## *CXCL13* expression on *helper T cells* in (1) diagnostic vs. relapse and (2) diagnostic vs. early relapse
+
+```{r}
+# diagnostic vs. relapse
+VP_by_gene(gene_list = c("CXCL13"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CXCL13_vs_naive_B_cells/CXCL13_HelperT-diag_vs_rel", 
+         comp_grps = list(c("diagnostic", "relapse")), 
+         cluster_or_cell_types = c("T helper"), 
+         width=6, height=4)
+
+# diagnostic vs. early relapse
+VP_by_gene(gene_list = c("CXCL13"),
+         file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CXCL13_vs_naive_B_cells/CXCL13_HelperT-diag_vs_early_rel", 
+         comp_grps = list(c("diagnostic", "earlyRelapse")), 
+         cluster_or_cell_types = c("T helper"), earlyRelapse = TRUE,
+         width=6, height=4)
+```
+
+## Visualize *proportion* of cells expressing CXCR5 / CXCL13 on helper T cells
+
+Per case: Is the proportion of CXCL13+ cells on helper T cells associated with naive B cell proportion?
+
+NB: here proportion refers to positive cells of interest / total cells in sample
+
+```{r}
+# get *total cells* per sample from previous data frame
+total_cells.df <- unique(sample.celltype_num[c("sample_id", "total_cells")])
+
+# first get proportion of CXCL13+ cells on helper T cells
+CXCL13.df <- data.frame(CXCL13 = hl.subset[["RNA"]]@data["CXCL13",], 
+                      cell_type = hl.subset$celltype,
+                      sample_id = hl.subset$orig.ident,
+                      case_type = hl.subset$case.type,
+                      early_rel = hl.subset$earlyRelapse)
+
+# create variable to indicate if cell is positive (1) or not (0)
+CXCL13.df <- as.data.frame(CXCL13.df %>% dplyr::mutate(CXCL13_pos = ifelse(CXCL13 > 0, 1, 0)))
+# get number of positive cells per sample
+CXCL13.df <- as.data.frame(CXCL13.df %>% 
+  dplyr::group_by(sample_id) %>% 
+  dplyr::mutate(num_CXCL13_pos = sum(as.numeric(CXCL13_pos))))
+
+# attach total cells per sample
+CXCL13.df <- merge(CXCL13.df, total_cells.df, by="sample_id")
+
+# get proportion of positive cells per sample
+CXCL13.df <- as.data.frame(CXCL13.df %>% 
+                           dplyr::mutate(pct_CXCL13_pos = as.numeric(num_CXCL13_pos) / total_cells))
+
+CXCL13.summary <- unique(CXCL13.df[ c("sample_id", "case_type", "early_rel", "num_CXCL13_pos", "total_cells", "pct_CXCL13_pos")])
+
+# merge with naive B cell proportions
+naiveB.df <- subset(sample.celltype_num, sample.celltype_num$cell_identity == "Naive B cell")
+naiveB.df <- naiveB.df[c("sample_id", "proportion")]
+colnames(naiveB.df) <- c("sample_id", "pct_naive_B")
+CXCL13.summary <- merge(CXCL13.summary, naiveB.df, by="sample_id")
+
+# filter out RLN cases
+CXCL13.summary.HL <- subset(CXCL13.summary, CXCL13.summary$case_type %in% c("diagnostic", "relapse"))
+CXCL13.summary.relapse <- subset(CXCL13.summary.HL, CXCL13.summary.HL$case_type == "relapse")
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with points coloured by case type
+p1 <- ggplot(CXCL13.summary.HL, aes(x = pct_naive_B, y = pct_CXCL13_pos, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Proportion of Naive B cells") + 
+  ylab("CXCL13+ Helper T cells") +
+  scale_fill_manual(values=c("relapse"="salmon", 
+                       "diagnostic"="teal"))
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with trend line, R square and formula
+p2 <- ggplot(CXCL13.summary.HL, aes(x = pct_naive_B, y = pct_CXCL13_pos)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Proportion of Naive B cells") + 
+  ylab("CXCL13+ Helper T cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.6, label.y = 0.16) +
+  stat_regline_equation(label.x = 0.6, label.y = 0.15)
+
+grid.arrange(p1, p2, ncol=2)
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with points coloured by case type
+p3 <- ggplot(CXCL13.summary.relapse, aes(x = pct_naive_B, y = pct_CXCL13_pos, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Proportion of Naive B cells") + 
+  ylab("CXCL13+ Helper T cells")
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with trend line, R square and formula
+p4 <- ggplot(CXCL13.summary.relapse, aes(x = pct_naive_B, y = pct_CXCL13_pos)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Proportion of Naive B cells") + 
+  ylab("CXCL13+ Helper T cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.65, label.y = 0.16) +
+  stat_regline_equation(label.x = 0.65, label.y = 0.15)
+
+grid.arrange(p3, p4, ncol=2)
+
+# violin plots of CXCL13 positivity in diagnostic vs. relapse
+
+# first filter df to include on diagnostic / relapse cases
+CXCL13.summary1 <- subset(CXCL13.summary, CXCL13.summary$case_type %in% c("diagnostic", "relapse"))
+# calculate mean CXCR5 positivity per case type
+CXCL13.summary1 <- as.data.frame(CXCL13.summary1 %>%
+  select(pct_CXCL13_pos, case_type) %>%
+  group_by(case_type) %>%
+  mutate(mean_positivity = mean(pct_CXCL13_pos)))
+# plot
+p1 <- ggplot(CXCL13.summary1, aes(x = case_type, y = pct_CXCL13_pos)) + 
+  geom_violin(aes(fill = mean_positivity), trim = TRUE, scale = "width") +
+  # scale_y_continuous(trans='log2') +
+  stat_compare_means(comparisons = list(c("diagnostic", "relapse")), label = "p.format") +
+  stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+  xlab("") + ylab("")
+
+# next filter df to include on diagnostic / early relapse cases
+CXCL13.summary2 <- subset(CXCL13.summary, CXCL13.summary$early_rel %in% c("diagnostic", "earlyRelapse"))
+# calculate mean CXCR5 positivity per case type
+CXCL13.summary2 <- as.data.frame(CXCL13.summary2 %>%
+  select(pct_CXCL13_pos, early_rel) %>%
+  group_by(early_rel) %>%
+  mutate(mean_positivity = mean(pct_CXCL13_pos)))
+# plot
+p2 <- ggplot(CXCL13.summary2, aes(x = early_rel, y = pct_CXCL13_pos)) + 
+  geom_violin(aes(fill = mean_positivity), trim = TRUE, scale = "width") +
+  # scale_y_continuous(trans='log2') +
+  stat_compare_means(comparisons = list(c("diagnostic", "earlyRelapse")), label = "p.format") +
+  stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+  xlab("") + ylab("")
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+What is CXCR5 positivity on naive B cells in diagnostic vs. relapse? diagnostic vs. early relapse?
+
+```{r}
+hl.naive <- subset(x= hl_all.combined, subset = celltype == "Naive B cell")
+
+# first get proportion of CXCL13+ cells on helper T cells
+CXCR5.df <- data.frame(CXCR5 = hl.naive[["RNA"]]@data["CXCR5",], 
+                      cell_type = hl.naive$celltype,
+                      sample_id = hl.naive$orig.ident,
+                      case_type = hl.naive$case.type,
+                      early_rel = hl.naive$earlyRelapse)
+
+# create variable to indicate if cell is positive (1) or not (0)
+CXCR5.df <- as.data.frame(CXCR5.df %>% dplyr::mutate(CXCR5_pos = ifelse(CXCR5 > 0, 1, 0)))
+# get number of positive cells per sample
+CXCR5.df <- as.data.frame(CXCR5.df %>% 
+  dplyr::group_by(sample_id) %>% 
+  dplyr::mutate(num_CXCR5_pos = sum(as.numeric(CXCR5_pos))))
+
+# map total cells to analysis data frame
+CXCR5.df <- merge(CXCR5.df, total_cells.df, by="sample_id")
+
+# get proportion of positive cells per sample
+CXCR5.df <- as.data.frame(CXCR5.df %>% 
+                           dplyr::mutate(pct_CXCR5_pos = as.numeric(num_CXCR5_pos) / total_cells))
+
+CXCR5.summary <- unique(CXCR5.df[ c("sample_id", "case_type", "early_rel", "num_CXCR5_pos", "total_cells", "pct_CXCR5_pos")])
+
+# violin plots of CXCR5 positivity in diagnostic vs. relapse
+
+# first filter df to include on diagnostic / relapse cases
+CXCR5.summary1 <- subset(CXCR5.summary, CXCR5.summary$case_type %in% c("diagnostic", "relapse"))
+# calculate mean CXCR5 positivity per case type
+CXCR5.summary1 <- as.data.frame(CXCR5.summary1 %>%
+  select(pct_CXCR5_pos, case_type) %>%
+  group_by(case_type) %>%
+  mutate(mean_positivity = mean(pct_CXCR5_pos)))
+# plot
+p1 <- ggplot(CXCR5.summary1, aes(x = case_type, y = pct_CXCR5_pos)) + 
+  geom_violin(aes(fill = mean_positivity), trim = TRUE, scale = "width") +
+  # scale_y_continuous(trans='log2') +
+  stat_compare_means(comparisons = list(c("diagnostic", "relapse")), label = "p.format") +
+  stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+  xlab("") + ylab("")
+
+# next filter df to include on diagnostic / early relapse cases
+CXCR5.summary2 <- subset(CXCR5.summary, CXCR5.summary$early_rel %in% c("diagnostic", "earlyRelapse"))
+# calculate mean CXCR5 positivity per case type
+CXCR5.summary2 <- as.data.frame(CXCR5.summary2 %>%
+  select(pct_CXCR5_pos, early_rel) %>%
+  group_by(early_rel) %>%
+  mutate(mean_positivity = mean(pct_CXCR5_pos)))
+# plot
+p2 <- ggplot(CXCR5.summary2, aes(x = early_rel, y = pct_CXCR5_pos)) + 
+  geom_violin(aes(fill = mean_positivity), trim = TRUE, scale = "width") +
+  # scale_y_continuous(trans='log2') +
+  stat_compare_means(comparisons = list(c("diagnostic", "earlyRelapse")), label = "p.format") +
+  stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+  xlab("") + ylab("")
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+## Now correlate CXCL13 (on helper T) and CXCR5 (no naive B) positivity and avg expression
+
+```{r}
+CXCL13.temp <- CXCL13.summary[c("sample_id", "case_type", "pct_CXCL13_pos")]
+CXCR5.temp <- CXCR5.summary[c("sample_id", "early_rel", "pct_CXCR5_pos")]
+
+data.merged <- merge(CXCL13.temp, CXCR5.temp, by="sample_id")
+
+data.merged.HL <- subset(data.merged, data.merged$case_type %in% c("diagnostic", "relapse"))
+data.merged.relapse <- subset(data.merged, data.merged$case_type == "relapse")
+
+p1 <- ggplot(data.merged.HL, aes(x = pct_CXCL13_pos, y = pct_CXCR5_pos, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("CXCL13+ Helper T cells") + 
+  ylab("CXCR5+ Naive B cells")
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with trend line, R-square + formula
+p2 <- ggplot(data.merged.HL, aes(x = pct_CXCL13_pos, y = pct_CXCR5_pos)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("CXCL13+ Helper T cells") + 
+  ylab("CXCR5+ Naive B cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.12, label.y = 0.28) +
+  stat_regline_equation(label.x = 0.12, label.y = 0.26)
+
+grid.arrange(p1, p2, ncol=2)
+
+p3 <- ggplot(data.merged.relapse, aes(x = pct_CXCL13_pos, y = pct_CXCR5_pos, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("CXCL13+ Helper T cells") + 
+  ylab("CXCR5+ Naive B cells")
+
+# scatter plot of pct_CXCL13_pos vs. pct_naive_B with trend line, R-square + formula
+p4 <- ggplot(data.merged.relapse, aes(x = pct_CXCL13_pos, y = pct_CXCR5_pos)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("CXCL13+ Helper T cells") + 
+  ylab("CXCR5+ Naive B cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.12, label.y = 0.28) +
+  stat_regline_equation(label.x = 0.12, label.y = 0.26)
+
+grid.arrange(p3, p4, ncol=2)
+
+# scatter of avg CXCL13 expr on helper T vs. CXCR5 expr on naive B (diagnostic + relapse cases)
+p5 <- ggplot(avg_expr.merged.HL, aes(x = CXCL13, y = CXCR5, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Mean CXCL13 expr on Helper T cells") + 
+  ylab("Mean CXCR5 expr on Naive B cells")
+
+# with trend line, R-square + formula
+p6 <- ggplot(avg_expr.merged.HL, aes(x = CXCL13, y = CXCR5)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Mean CXCL13 expr on Helper T cells") + 
+  ylab("Mean CXCR5 expr on Naive B cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 1, label.y = 2.9) +
+  stat_regline_equation(label.x = 1, label.y = 2.7)
+
+# plot with both trend line AND colours by cohort
+p5_6 <- ggplot(avg_expr.merged.HL, aes(x = CXCL13, y = CXCR5, group=1)) + 
+  geom_point(aes(color=factor(case_type)), size = 3, alpha = 0.7) + 
+  xlab("Mean CXCL13 expr on Helper T cells") + 
+  ylab("Mean CXCR5 expr on Naive B cells") +
+  labs(color = "case type") +
+  scale_color_brewer(palette = "Set1") +
+  geom_smooth(method=lm, formula = y ~ x) +
+  stat_cor(label.x = 1, label.y = 2.9) +
+  stat_regline_equation(label.x = 1, label.y = 2.7)
+
+
+grid.arrange(p5, p6, ncol=2)
+
+# scatter of avg CXCL13 expr on helper T vs. CXCR5 expr on naive B (relapse cases only)
+p7 <- ggplot(avg_expr.merged.relapse, aes(x = CXCL13, y = CXCR5, color=case_type)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Mean CXCL13 expr on Helper T cells") + 
+  ylab("Mean CXCR5 expr on Naive B cells")
+
+# with trend line, R-square + formula
+p8 <- ggplot(avg_expr.merged.relapse, aes(x = CXCL13, y = CXCR5)) + 
+  geom_point(size = 3, alpha = 0.7) + 
+  xlab("Mean CXCL13 expr on Helper T cells") + 
+  ylab("Mean CXCR5 expr on Naive B cells") +
+  geom_smooth(method=lm) +
+  stat_cor(label.x = 0.7, label.y = 2.9) +
+  stat_regline_equation(label.x = 0.7, label.y = 2.7)
+
+grid.arrange(p7, p8, ncol=2)
+
+
+
+avg_expr.merged.relapse
+```
+
+
+
+
