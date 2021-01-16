@@ -401,6 +401,12 @@ p1 <- DimPlot(hl_all.combined,
 
 # split by cluster
 p2 <- DimPlot(hl_all.combined, reduction = "umap", label = TRUE) 
+# p2 <- DimPlot(hl_all.combined, reduction = "umap", group.by = "celltype", label = TRUE) 
+
+library(ggplot2)
+library(gridExtra)
+library(cowplot)
+plot_grid(p1, p2, align = "h", ncol = 2, rel_widths = c(3/7, 4/7))
 
 # Plot clusters by themselves
 pdf("umap-clusters.pdf", width = 8, height = 7)
@@ -425,7 +431,8 @@ write.table(hl.all.hvg, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.in
 ## Create heatmap of average expression of clusters across component markers
 
 ```{r}
-# create heatmap split by component
+#hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.clustered.rds")
+# create heatmap split by component - to add PRF1, CD11B (ITGAM) [[CTL]], CXCR3, CD1D, and IL35 (IL12A) [[B cell]]
 component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", sep = "\t", header = TRUE, fill = TRUE)
 
 # component markers that are in list of HVG:
@@ -452,19 +459,20 @@ component.mappings$Alt_name <- NULL
 # reorder expression matrix to match component mappings
 hl.integrated.components.cluster.avgs.ordered <- hl.integrated.components.cluster.avgs[ match(rownames(components.ordered), rownames(hl.integrated.components.cluster.avgs)), ]
 
+pdf("heatmap-component_markers-avg_expr_per_cluster-tall.pdf", width = 12, height = 15)
 p4 <- pheatmap(hl.integrated.components.cluster.avgs.ordered, 
          annotation_row = component.mappings,
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), border_color = NA)
+         gaps_row = c(13,19,21,23,26,31,33,37,38,39,40,43,50,52), border_color = NA)
 
 pdf("heatmap-component_markers-avg_expr_per_cluster.pdf", width = 13, height = 5)
 p4.rotated <- pheatmap(t(hl.integrated.components.cluster.avgs.ordered), 
          annotation_col = component.mappings,
          cluster_cols = FALSE, 
          annotation_names_col = FALSE, 
-         gaps_col = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
+         gaps_col = c(13,19,21,23,26,31,33,37,38,39,40,43,50,52), 
          angle_col = 45, 
          border_color = NA)
 dev.off()
@@ -528,7 +536,7 @@ for (c in 1:NUM_CLUSTERS) {
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(11,17,19,22,27,29,33,34,35,36,39,46,48), 
+         gaps_row = c(13,19,21,23,26,31,33,37,38,39,40,43,50,52), 
          border_color = NA, show_colnames = FALSE, scale = "none")
   dev.off()
 }
@@ -591,7 +599,7 @@ p <- ggplot(celltype.numcells, aes(x = reorder(celltype, -numcells), y = numcell
       geom_text(aes(label=numcells), hjust=0.5, vjust=-1, size=3, color="gray47") +
       theme(legend.position="right")
 
-# create barplot showing proportion of cells per cell type baed on case type
+# create barplot showing proportion of cells per cell type based on case type
 celltype.numcells2 <- as.data.frame(table(hl_all.combined$celltype, hl_all.combined$case.type))
 colnames(celltype.numcells2) <- c("celltype", "case_type", "numcells")
 
@@ -674,34 +682,58 @@ See https://bioconductor.org/packages/release/data/experiment/vignettes/celldex/
 ```{r}
 library(celldex)
 library(SingleR)
+library(SingleCellExperiment)
 
-# focus on macrophage / pDC cluster
+# Subset 1: focus on macrophage / pDC cluster
 hl.macrophage_pDC <- subset(x = hl_all.combined, subset = celltype == "Macrophage/pDC")
 # Result: 514 cells (from a total of 166194; 0.3% of cells are kept)
+
+# Subset 2: A larger population of cells including the macrophage / pDC cluster
+clusters <- c("Macrophage/pDC", "Plasma cell", "NK cell", "CTL", "GCB and T cell proliferation")
+hl.subset <- subset(x = hl_all.combined, subset = celltype %in% clusters)
+# Result: 13711 cells --> 8% of cells are kept
 
 # pull matrix from Seurat Object
 singler_data <- as.SingleCellExperiment(hl.macrophage_pDC)
 
 # get reference data
-# ref <- HumanPrimaryCellAtlasData() # deprecated
-# ref <- BlueprintEncodeData()
+ref <- HumanPrimaryCellAtlasData() # deprecated
+ref <- BlueprintEncodeData()
 # ref <- ImmGenData()
 # ref <- DatabaseImmuneCellExpressionData()
 # ref <- NovershternHematopoieticData()
-ref <- MonacoImmuneData()
+# ref <- MonacoImmuneData()
 
 # Get cell type information
 cell.main <- SingleR(singler_data, ref, labels = ref$label.main)
+cell.fine <- SingleR(singler_data, ref, labels = ref$label.fine)
 
 # Store cell type information into Seurat Object
 # hl.macrophage_pDC[['HPCA.labels.main']] <- cell.main$labels
-# hl.macrophage_pDC[['Blueprint.labels.main']] <- cell.main$labels
+hl.macrophage_pDC[['Blueprint.labels.main']] <- cell.main$labels
+hl.macrophage_pDC[['Blueprint.labels.fine']] <- cell.fine$labels
 # hl.macrophage_pDC[['ImmGen.labels.main']] <- cell.main$labels
 # hl.macrophage_pDC[['DbImmuneCell.labels.main']] <- cell.main$labels
 # hl.macrophage_pDC[['Novershtern.labels.main']] <- cell.main$labels
-hl.macrophage_pDC[['Monaco.labels.main']] <- cell.main$labels
+# hl.macrophage_pDC[['Monaco.labels.main']] <- cell.main$labels
 
-hl.macrophage_pDC <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.macrophage_pDC.celldex.rds")
+# hl.macrophage_pDC <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.macrophage_pDC.celldex.rds")
+hl.blueprint <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.blueprint.rds")
+cell.main.BP <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/cell.main.Blueprint.integrated.rds")
+cell.fine.BP <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/cell.fine.Blueprint.integrated.rds")
+
+# visualize scores
+plotScoreHeatmap(cell.main)
+plotDeltaDistribution(cell.main, ncol = 3)
+
+# visualize distribution of cells across labels and clusters
+tab <- table()
+tab <- table(Assigned = cell.main$pruned.labels, 
+             Cluster = colLabels(hl.macrophage_pDC))
+
+# Adding a pseudo-count of 10 to avoid strong color jumps with just 1 cell.
+library(pheatmap)
+pheatmap(log2(tab+10), color=colorRampPalette(c("white", "blue"))(101))
 
 # visualize on umap and with heatmaps
 p1 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "HPCA.labels.main") + 
@@ -716,10 +748,22 @@ p5 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "Novershtern.lab
   labs(color = "Novershtern") 
 p6 <- DimPlot(hl.macrophage_pDC, reduction = "umap", group.by = "Monaco.labels.main") +
   labs(color = "Monaco") 
-
 pdf("umap-macrophage_pDC_celldex.pdf", width = 14, height = 7)
 grid.arrange(p1, p2, p3, p4, p5, p6, ncol=3)
 dev.off()
+
+# subset
+DimPlot(hl.subset, reduction = "umap", group.by = "Blueprint.labels.main") +
+  labs(color = "Blueprint Encode") 
+
+# full dataset
+hl.blueprint[['Blueprint.labels.main']] <- cell.main.BP$labels
+hl.blueprint[['Blueprint.labels.fine']] <- cell.fine.BP$labels
+p1 <- DimPlot(hl.blueprint, reduction = "umap", group.by = "Blueprint.labels.main") +
+  labs(color = "Blueprint: main labels") 
+p2 <- DimPlot(hl.blueprint, reduction = "umap", group.by = "Blueprint.labels.fine") +
+  labs(color = "Blueprint: fine labels") 
+
 ```
 
 ## Draw heatmaps for celldex annotations
@@ -781,6 +825,23 @@ pheatmap(hl.macrophage_pDC.components.cluster.avgs.ordered,
          border_color = NA, main = ref_name)
 dev.off()
 
+```
+
+## Isolate CD4+ CTL-cells
+
+```{r}
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.clustered.rds")
+# hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.annotated.rds")
+# subset based on:
+#   Expression of CD3, CD4
+#   No expression of CD56, CD8, CD19, and CD68
+
+# First get CTL cluster
+hl.ctl <- subset(hl_all.combined, subset = celltype == "")
+
+# Subset 1: focus on macrophage / pDC cluster
+# hl.macrophage_pDC <- subset(x = hl_all.combined, subset = celltype == "Macrophage/pDC")
+# Result: 514 cells (from a total of 166194; 0.3% of cells are kept)
 ```
 
 ## Find conserved markers (to help refine cluster annotations)
@@ -921,7 +982,7 @@ For FindMarkers function, NB: group 1 vs. group 2 indicates for avg_logFC (log f
 ## Functions to perform DE comparisons at the cluster (cell type) level
 
 ```{r}
-# function to fine DE genes between all pairs
+# function to find DE genes between all pairs
 
 get_de_genes <- function(comparators, de.test, cell_counts.df) {
   
@@ -1583,8 +1644,19 @@ VlnPlot(hl_all.combined, features = v2_v_v3.de.sig_genes,
                          assay = "RNA", slot = "data") + xlab("")
 dev.off()
 
+# Stacy's selected genes (known to be associated with cancer / lymphoma)
 sig_genes.GOI <- c("JUND", "ATM", "PTEN", "ARID1B", "KMT2A", "CD81")
 pdf("VlnPlot-GOI_up_in_V3_vs_V2.pdf", width = 24, height = 16)
+VlnPlot(hl_all.combined, features = sig_genes.GOI,
+                         split.by = "chemistry", group.by = "orig.ident",
+                         log = FALSE, pt.size = 0, ncol = 2, 
+                         assay = "RNA", slot = "data") + xlab("")
+dev.off()
+
+# genes of interest for Tomo
+sig_genes.GOI <- c("LAG3", "GZMA", "GZMB", "GZMK", "PRF1", "HAVCR2", "IFNG", "PDCD1", "CD80", "CD86", "MKI67", "CXCL13", "CXCR5", "CXCR3", "CD28", "TOX", "CXCL10", "CXCL11", "CCL22", "CD163", "CD274", "IL3RA", "HLA-DRB5", "IGF1R", "CSF1R", "DAB2")
+# sig_genes.GOI <- c("LAG3")
+pdf("VlnPlot-Tomo_GOI_up_in_V3_vs_V2-no_points.pdf", width = 20, height = 40)
 VlnPlot(hl_all.combined, features = sig_genes.GOI,
                          split.by = "chemistry", group.by = "orig.ident",
                          log = FALSE, pt.size = 0, ncol = 2, 
@@ -1821,28 +1893,28 @@ VP_by_gene_for_chemistry <- function(gene_list,
 #          width=20, height=10)
 
 # 2. Macrophage/pDC cluster: CD163, PD-L1 (-> CD274), CD123 (-> IL3RA), CD80, CD86, CXCL9, CXCL10, CXCL11, CD40, CCL22, TIM3 (-> HAVCR2), HLA-DRB5, GZMB
-VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB"),
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC-diag_vs_rel",
          comp_grps = list(c("diagnostic", "relapse")),
          cluster_or_cell_types = c("Macrophage/pDC"),
          width=20, height=10)
 
 # 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
-VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86", "TCF7"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("T reg"), 
          width=20, height=10)
 
 # 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
-VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86", "TCF7"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("T helper"), 
          width=20, height=10)
 
 # 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
-VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86", "TCF7", "TOX"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL-diag_vs_rel", 
          comp_grps = list(c("diagnostic", "relapse")), 
          cluster_or_cell_types = c("CTL"), 
@@ -1900,7 +1972,7 @@ VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR
 #          width=20, height=10, 
 #          earlyRelapse = TRUE)
 
-VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB"),
+VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CXCL10", "CXCL11", "CD40", "CCL22", "HAVCR2", "HLA-DRB5", "GZMB", "IGF1R", "CSF1R", "DAB2"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/macrophage_pDC-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("Macrophage/pDC"), 
@@ -1908,7 +1980,7 @@ VP_by_gene(gene_list = c("CD163", "CD274", "IL3RA", "CD80", "CD86", "CXCL9", "CX
          earlyRelapse = TRUE)
 
 # 4. Treg (cell type): LAG3, FOXP3, TIM3 (-> HAVCR2), CXCR3, PD-1 (-> PDCD1), Ki67 (-> MKI67), CD30 (-> TNFRSF8), TOX, CXCR4
-VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "TOX", "CXCR4", "CD80", "CD86", "TCF7"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/Treg-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("T reg"), 
@@ -1916,7 +1988,7 @@ VP_by_gene(gene_list = c("LAG3", "FOXP3", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
          earlyRelapse = TRUE)
 
 # 6. Helper T cell (cell type): LAG3, CXCR5, TIM3 (HAVCR2), CXCR3, PD-1 (PDCD1), Ki67 (MKI67), CD30 (TNFRSF8), CXCL13, TOX, CD28, IL-4 (IL4), CXCR4
-VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "TNFRSF8", "CXCL13", "TOX", "CD28", "IL4", "CXCR4", "CD80", "CD86", "TCF7"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/HelperT-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("T helper"), 
@@ -1924,7 +1996,7 @@ VP_by_gene(gene_list = c("LAG3", "CXCR5", "HAVCR2", "CXCR3", "PDCD1", "MKI67", "
          earlyRelapse = TRUE)
 
 # 8. CTL (cell type): GZMA, GZMB, GZMK, PRF1, CXCR3, IFNG, TIM3 (HAVCR2), LAG3, PD1 (PDCD1), CXCR4
-VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86"),
+VP_by_gene(gene_list = c("GZMA", "GZMB", "GZMK", "PRF1", "CXCR3", "IFNG", "HAVCR2", "LAG3", "PDCD1", "CXCR4", "CD80", "CD86", "TCF7", "TOX"),
          file_name = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/vln_plots/CTL-diag_vs_early_rel", 
          comp_grps = list(c("diagnostic", "earlyRelapse")), 
          cluster_or_cell_types = c("CTL"), 
