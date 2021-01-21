@@ -1,0 +1,316 @@
+---
+title: "LSARP_analysis-CD4_CTL_clustering"
+author: "Stacy Hung"
+date: "20/01/2021"
+output: html_document
+---
+
+## Load libraries
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(pheatmap)
+```
+
+## Step 1: Filter for B cells based on expression / non-expression of marker combinations
+
+```{r}
+hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.annotated.rds")
+
+# Step 1: Filter cells for B cells based on:
+#   Expression of CD20 (MS4A1)
+#   No expression of CD3 (CD3D) CD4, CD8 (CD8A), CD68, CD56 (NCAM1)
+hl.B_markers.cells <- which(hl_all.combined@assays$RNA@data["MS4A1",] > 0 & 
+                               hl_all.combined@assays$RNA@data["CD3D",] == 0 &
+                               hl_all.combined@assays$RNA@data["CD4",] == 0 &
+                               hl_all.combined@assays$RNA@data["CD8A",] == 0 &
+                               hl_all.combined@assays$RNA@data["NCAM1",] == 0 &
+                               hl_all.combined@assays$RNA@data["CD68",] == 0
+                            ) # ? (?% of all cells)
+hl.filtered.B_markers <- subset(hl_all.combined, cells = hl.B_markers.cells)
+```
+
+## Step 2: Subcluster and plot heatmaps of clusters
+
+```{r}
+DefaultAssay(hl.filtered.B_markers) <- "integrated"
+hl.filtered.B_markers <- FindNeighbors(hl.filtered.B_markers, reduction = "pca", dims = 1:30)
+hl.filtered.B_markers.subclustered <- FindClusters(hl.filtered.B_markers, resolution = 0.4)
+
+Idents(hl.filtered.B_markers.subclustered) <- hl.filtered.B_markers.subclustered$seurat_clusters
+
+# plot umap
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/umap-Breg-subclusters.pdf", width = 6, height = 5)
+DimPlot(hl.filtered.B_markers.subclustered, reduction = "umap", label = TRUE) 
+dev.off()
+
+# plot average expression heatmap for component markers
+avg_exp.heatmaps <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered)
+
+# plot average expression heatmap for *B-cell-specific* markers
+avg_exp.heatmaps.B_cell <- avg_B_ComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered)
+
+# plot individual expression heatmaps for each cluster
+printSCHeatmapsPerCluster(data = hl.filtered.B_markers.subclustered, 
+                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
+
+printSCHeatmapsPerCluster_Bmarkers(data = hl.filtered.B_markers.subclustered, 
+                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
+```
+
+## Annotate clusters (Tomo)
+
+```{r}
+# attach manual annotations
+hl.filtered.B_markers.subclustered <- RenameIdents(hl.filtered.B_markers.subclustered,
+                                `0` = "pDC",
+                                `1` = "macrophage",
+                                `2` = "macrophage",
+                                `3` = "pDC",
+                                `4` = "macrophage")
+hl.filtered.B_markers.subclustered$celltype2 <- Idents(hl.filtered.B_markers.subclustered)
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/umap-CD4-subclusters-annotated.pdf", width = 6, height = 5)
+DimPlot(hl.filtered.B_markers.subclustered, reduction = "umap", label = TRUE) 
+dev.off()
+
+saveRDS(hl.filtered.B_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered.annotated.rds")
+```
+
+## Function: Create heatmap of average expression of clusters across *B cell* component markers
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+
+```{r}
+avg_B_ComponentExpressionHeatmap <- function(data) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/B_component_genes.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get average expression of each gene
+  cluster.averages <- AverageExpression(data, features = markers.to.plot, return.seurat = TRUE)
+  #data.avg <- GetAssayData(object = cluster.averages, slot = "scale.data")
+  data.avg <- GetAssayData(object = cluster.averages, slot = "data", assay = "SCT")
+  # now match component gene list to those being plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  rownames(component.mappings) <- component.mappings$Gene
+  # order by component then gene name so heatmap legend makes sense
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  component.mappings$Gene <- NULL
+  component.mappings$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.avg.ordered <- data.avg[match(rownames(components.ordered), rownames(data.avg)), ]
+
+  heatmaps <- vector('list', 2)
+  
+  # heatmap of average expression per cluster across all component genes
+  heatmaps[[1]] <- pheatmap(data.avg.ordered, 
+         annotation_row = component.mappings,
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         gaps_row = c(2,3,9,10,12,13), 
+         angle_col = 45)
+  # rotated version of heatmap
+  heatmaps[[2]] <- pheatmap(t(data.avg.ordered), 
+         annotation_col = component.mappings,
+         cluster_cols = FALSE, 
+         annotation_names_col = FALSE, 
+         gaps_col = c(2,3,9,10,12,13), 
+         angle_col = 45)
+  
+  return(heatmaps)
+}
+
+```
+
+
+## Function: Create heatmap of average expression of clusters across component markers
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+
+```{r}
+avgComponentExpressionHeatmap <- function(data) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get average expression of each gene
+  cluster.averages <- AverageExpression(data, features = markers.to.plot, return.seurat = TRUE)
+  #data.avg <- GetAssayData(object = cluster.averages, slot = "scale.data")
+  data.avg <- GetAssayData(object = cluster.averages, slot = "data", assay = "SCT")
+  # now match component gene list to those being plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  rownames(component.mappings) <- component.mappings$Gene
+  # order by component then gene name so heatmap legend makes sense
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  component.mappings$Gene <- NULL
+  component.mappings$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.avg.ordered <- data.avg[match(rownames(components.ordered), rownames(data.avg)), ]
+
+  heatmaps <- vector('list', 2)
+  
+  # heatmap of average expression per cluster across all component genes
+  heatmaps[[1]] <- pheatmap(data.avg.ordered, 
+         annotation_row = component.mappings,
+         cluster_rows = FALSE, 
+         annotation_names_row = FALSE, 
+         angle_col = 45, 
+         gaps_row = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53))
+  # rotated version of heatmap
+  heatmaps[[2]] <- pheatmap(t(data.avg.ordered), 
+         annotation_col = component.mappings,
+         cluster_cols = FALSE, 
+         annotation_names_col = FALSE, 
+         gaps_col = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53), 
+         angle_col = 45)
+  
+  return(heatmaps)
+}
+
+```
+
+## Function: Produce single-cell level heatmaps of expression for EACH cluster using *B cell* markers
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+  - plot_folder: absolute path of folder to print heatmaps to
+
+```{r}
+printSCHeatmapsPerCluster_Bmarkers <- function(data, plot_folder) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/B_component_genes.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get total number of clusters
+  NUM_CLUSTERS = length(unique(data$seurat_clusters))
+  # get expression matrix (features by barcodes)
+  data.expr <- data@assays$SCT@data
+  # retrieve expression for each cell across the component genes of interest
+  data.expr.markers <- data.expr[ rownames(data.expr) %in% markers.to.plot , ]
+  # match component gene list to those that can be plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  # order by component then gene name so that the heatmap legend makes sense
+  rownames(component.mappings) <- component.mappings$Gene
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  components.ordered$Gene <- NULL
+  components.ordered$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.expr.markers.ordered <- data.expr.markers[ row.names(components.ordered), ]
+  # to create separate expr matrices for each cluster, need mappings for cell --> cluster
+  data.clusters <- data$seurat_clusters
+  # convert to char
+  clusters.char <- levels(data.clusters)[data.clusters] # ordered vector of cluster ids (0 through 26)
+  barcodes.cluster <- attributes(data.clusters)$names # ordered vector of barcodes (76,607 unique entries)
+  clusters.df <- data.frame(barcodes.cluster, clusters.char)
+ 
+  expr.markers <- vector('list', NUM_CLUSTERS)
+  heatmaps <- vector('list', NUM_CLUSTERS)
+  hl.seurat <- vector('list', NUM_CLUSTERS)
+  
+  for (c in 1:NUM_CLUSTERS) {
+    hl.seurat[[c]] <- subset(data, idents = c-1) # filter by cluster
+    hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot) # filter by genes
+    
+    # retrieve expression for each cell across the component genes of interest
+    expr.temp <- hl.seurat[[c]]@assays$SCT@data
+    expr.markers[[c]] <- expr.temp[ rownames(expr.temp) %in% markers.to.plot , ]
+    
+    # reorder expression matrix to match component mappings
+    expr.markers[[c]] <- expr.markers[[c]][ row.names(components.ordered), ]
+  
+    filename <- paste(plot_folder, "heatmap-B_markers-cluster", 
+                      c-1, ".pdf", sep = "")
+    pdf(filename, width = 8, height = 4)
+    heatmaps[[c]] <- pheatmap(expr.markers[[c]], 
+           annotation_row = components.ordered, 
+           cluster_rows = FALSE, 
+           annotation_names_row = FALSE, 
+           angle_col = 45, 
+           gaps_row = c(2,3,9,10,12,13), 
+           border_color = NA, show_colnames = FALSE, scale = "none")
+    dev.off()
+  }
+ 
+}
+```
+
+## Function: Produce single-cell level heatmaps of expression for EACH cluster
+
+Parameters:
+  - data: Seurat object with $seurat_clusters
+  - plot_folder: absolute path of folder to print heatmaps to
+
+```{r}
+printSCHeatmapsPerCluster <- function(data, plot_folder) {
+  # get component markers
+  component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+  # first, get list of highly-variable genes
+  hvg <- data@assays$integrated@var.features
+  # only look at markers that are in the HVG list
+  markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
+  # get total number of clusters
+  NUM_CLUSTERS = length(unique(data$seurat_clusters))
+  # get expression matrix (features by barcodes)
+  data.expr <- data@assays$SCT@data
+  # retrieve expression for each cell across the component genes of interest
+  data.expr.markers <- data.expr[ rownames(data.expr) %in% markers.to.plot , ]
+  # match component gene list to those that can be plotted
+  component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
+  # order by component then gene name so that the heatmap legend makes sense
+  rownames(component.mappings) <- component.mappings$Gene
+  components.ordered <- component.mappings[order(component.mappings$Component, component.mappings$Gene), ]
+  components.ordered$Gene <- NULL
+  components.ordered$Alt_name <- NULL
+  # reorder expression matrix to match component mappings
+  data.expr.markers.ordered <- data.expr.markers[ row.names(components.ordered), ]
+  # to create separate expr matrices for each cluster, need mappings for cell --> cluster
+  data.clusters <- data$seurat_clusters
+  # convert to char
+  clusters.char <- levels(data.clusters)[data.clusters] # ordered vector of cluster ids (0 through 26)
+  barcodes.cluster <- attributes(data.clusters)$names # ordered vector of barcodes (76,607 unique entries)
+  clusters.df <- data.frame(barcodes.cluster, clusters.char)
+ 
+  expr.markers <- vector('list', NUM_CLUSTERS)
+  heatmaps <- vector('list', NUM_CLUSTERS)
+  hl.seurat <- vector('list', NUM_CLUSTERS)
+  
+  for (c in 1:NUM_CLUSTERS) {
+    hl.seurat[[c]] <- subset(data, idents = c-1) # filter by cluster
+    hl.seurat[[c]] <- subset(hl.seurat[[c]], features = markers.to.plot) # filter by genes
+    
+    # retrieve expression for each cell across the component genes of interest
+    expr.temp <- hl.seurat[[c]]@assays$SCT@data
+    expr.markers[[c]] <- expr.temp[ rownames(expr.temp) %in% markers.to.plot , ]
+    
+    # reorder expression matrix to match component mappings
+    expr.markers[[c]] <- expr.markers[[c]][ row.names(components.ordered), ]
+  
+    filename <- paste(plot_folder, "heatmap-cluster", 
+                      c-1, ".pdf", sep = "")
+    pdf(filename, width = 8, height = 8)
+    heatmaps[[c]] <- pheatmap(expr.markers[[c]], 
+           annotation_row = components.ordered, 
+           cluster_rows = FALSE, 
+           annotation_names_row = FALSE, 
+           angle_col = 45, 
+           gaps_row = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53), 
+           border_color = NA, show_colnames = FALSE, scale = "none")
+    dev.off()
+  }
+ 
+}
+```
+
