@@ -14,6 +14,8 @@ library(pheatmap)
 library(ggplot2)
 library(dplyr)
 library(gridExtra)
+library(ggrepel)
+library(ggpubr)
 ```
 
 ## Step 1: Filter "CD4" based on expression / non-expression of marker combinations
@@ -78,9 +80,6 @@ saveRDS(hl.filtered.CD4_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/
 To calculate proportion for each (patient): Total CD4+ CTL cells / [ Total CD4+ cells | Total cells in patient ]
 
 - between patients
-- diagnostic vs. *all* relapse
-- diagnostic vs. refractory / early relapse
-- HL (diagnostic + relapse) vs. RLN
 
 ```{r}
 # get cells belonging to "CD4 CTL" cluster (and have EBV status)
@@ -138,7 +137,148 @@ pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/barplot-CD4_CTL_prop
     width = 10, height = 9.5)
 grid.arrange(p1, p2)
 dev.off()
+```
 
+Compare CD4 CTL proportions (relative to CD4 filtered cells and relative to total cells) for:
+
+- diagnostic vs. *all* relapse
+- diagnostic vs. refractory / early relapse
+- HL (diagnostic + relapse) vs. RLN
+
+For these comparisons, we do *not* care about EBV status
+
+```{r}
+hl.CD4_CTL.cells <- which(hl.filtered.CD4_markers.subclustered$celltype2 == "CD4 CTL")
+hl.CD4_CTL <- subset(hl.filtered.CD4_markers.subclustered, cells = hl.CD4_CTL.cells)
+hl.CD4_CTL.patient.ebv <- as.data.frame(table(hl.CD4_CTL$orig.ident))
+colnames(hl.CD4_CTL.patient.ebv) <- c("sample_id", "num_cells")
+hl.filtered.CD4.patient <- as.data.frame(table(hl.filtered.CD4_markers$orig.ident))
+colnames(hl.filtered.CD4.patient) <- c("sample_id", "total_CD4_cells")
+hl_all.patient <- as.data.frame(table(hl_all.combined$orig.ident))
+colnames(hl_all.patient) <- c("sample_id", "total_cells")
+hl.CD4_CTL.df1 <- merge(hl.CD4_CTL.patient.ebv, hl.filtered.CD4.patient, by = "sample_id")
+hl.CD4_CTL.df <- merge(hl.CD4_CTL.df1, hl_all.patient, by = "sample_id")
+hl.CD4_CTL.df <- transform(hl.CD4_CTL.df, proportion_CD4 = (num_cells / total_CD4_cells) * 100 )
+hl.CD4_CTL.df <- transform(hl.CD4_CTL.df, proportion_total = (num_cells / total_cells) * 100 )
+
+# map on relapse and early relapse status and biology
+hl.CD4_CTL.df$case.type <- plyr::mapvalues(
+  x = hl.CD4_CTL.df$sample_id,
+  from = as.character(final.cohort$Sample),
+  to = as.character(final.cohort$case.type)
+)
+hl.CD4_CTL.df$EarlyRelapse <- plyr::mapvalues(
+  x = hl.CD4_CTL.df$sample_id,
+  from = as.character(final.cohort$Sample),
+  to = as.character(final.cohort$EarlyRelapse)
+)
+hl.CD4_CTL.df$Biology <- plyr::mapvalues(
+  x = hl.CD4_CTL.df$sample_id,
+  from = as.character(final.cohort$Sample),
+  to = as.character(final.cohort$Biology)
+)
+
+# calculate mean CD4 CTL proportion per case type
+
+# diagnostic vs. relapse - relative to CD4 filtered cells
+hl.CD4_CTL.diag_vs_rel <- as.data.frame(hl.CD4_CTL.df %>%
+  select(case.type, proportion_CD4, proportion_total) %>%
+  group_by(case.type) %>%
+  mutate(mean_proportion_CD4 = mean(proportion_CD4)))
+# diagnostic vs. relapse - relative to all cells
+hl.CD4_CTL.diag_vs_rel <- as.data.frame(hl.CD4_CTL.diag_vs_rel %>%
+  group_by(case.type) %>%
+  mutate(mean_proportion_total = mean(proportion_total)))
+
+# diagnostic vs. earlyRelapse - relative to CD4 filtered cells
+hl.CD4_CTL.diag_vs_earlyRel <- as.data.frame(hl.CD4_CTL.df %>%
+  select(EarlyRelapse, proportion_CD4, proportion_total) %>%
+  group_by(EarlyRelapse) %>%
+  mutate(mean_proportion_CD4 = mean(proportion_CD4)))
+# diagnostic vs. earlyRelapse - relative to all cells
+hl.CD4_CTL.diag_vs_earlyRel <- as.data.frame(hl.CD4_CTL.diag_vs_earlyRel %>%
+  group_by(EarlyRelapse) %>%
+  mutate(mean_proportion_total = mean(proportion_total)))
+
+# HL vs. RLN - relative to CD4 filtered cells
+hl.CD4_CTL.hl_vs_rln <- as.data.frame(hl.CD4_CTL.df %>%
+  select(Biology, proportion_CD4, proportion_total) %>%
+  group_by(Biology) %>%
+  mutate(mean_proportion_CD4 = mean(proportion_CD4)))
+# HL vs. RLN - relative to all cells
+hl.CD4_CTL.hl_vs_rln <- as.data.frame(hl.CD4_CTL.hl_vs_rln %>%
+  group_by(Biology) %>%
+  mutate(mean_proportion_total = mean(proportion_total)))
+
+# violin plots
+
+# Diagnostic vs. relapse: filter diagnostic / relapse cases
+hl.CD4_CTL.diag_vs_rel <- subset(hl.CD4_CTL.diag_vs_rel, 
+                                 hl.CD4_CTL.diag_vs_rel$case.type %in% c("diagnostic", "relapse"))
+
+p.diag_vs_rel1 <- ggplot(hl.CD4_CTL.diag_vs_rel, aes(x = case.type, y = proportion_CD4)) + 
+  geom_violin(aes(fill = mean_proportion_CD4), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("diagnostic", "relapse")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+
+p.diag_vs_rel2 <- ggplot(hl.CD4_CTL.diag_vs_rel, aes(x = case.type, y = proportion_total)) + 
+  geom_violin(aes(fill = mean_proportion_total), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("diagnostic", "relapse")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+#stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.2) +
+
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/violin-CD4_CTL-diag_vs_rel.pdf", 
+    width = 12, height = 5)
+grid.arrange(p.diag_vs_rel1, p.diag_vs_rel2, ncol=2)
+dev.off()
+
+# Diagnostic vs. early relapse: filter for diagnostic / early relapse cases
+hl.CD4_CTL.diag_vs_earlyRel <- subset(hl.CD4_CTL.diag_vs_earlyRel, 
+                                      hl.CD4_CTL.diag_vs_earlyRel$EarlyRelapse == "diagnostic" |
+                                        hl.CD4_CTL.diag_vs_earlyRel$EarlyRelapse == "earlyRelapse")
+
+p.diag_vs_earlyRel1 <- ggplot(hl.CD4_CTL.diag_vs_earlyRel, aes(x = EarlyRelapse, y = proportion_CD4)) + 
+  geom_violin(aes(fill = mean_proportion_CD4), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("diagnostic", "earlyRelapse")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+
+p.diag_vs_earlyRel2 <- ggplot(hl.CD4_CTL.diag_vs_earlyRel, aes(x = EarlyRelapse, y = proportion_total)) + 
+  geom_violin(aes(fill = mean_proportion_total), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("diagnostic", "earlyRelapse")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/violin-CD4_CTL-diag_vs_earlyRel.pdf", 
+    width = 12, height = 5)
+grid.arrange(p.diag_vs_earlyRel1, p.diag_vs_earlyRel2, ncol=2)
+dev.off()
+
+# HL vs. RLN
+p.hl_vs_rln1 <- ggplot(hl.CD4_CTL.hl_vs_rln, aes(x = Biology, y = proportion_CD4)) + 
+  geom_violin(aes(fill = mean_proportion_CD4), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("HL", "RLN")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+
+p.hl_vs_rln2 <- ggplot(hl.CD4_CTL.hl_vs_rln, aes(x = Biology, y = proportion_total)) + 
+  geom_violin(aes(fill = mean_proportion_total), trim = TRUE, scale = "width") +
+  stat_compare_means(comparisons = list(c("HL", "RLN")), label = "p.format") +
+  geom_boxplot(width=0.2) +
+  xlab("") + ylab("") +
+  scale_y_continuous(trans='log2')
+
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/violin-CD4_CTL-HL_vs_RLN.pdf", 
+    width = 12, height = 5)
+grid.arrange(p.hl_vs_rln1, p.hl_vs_rln2, ncol=2)
+dev.off()
 
 
 ```
