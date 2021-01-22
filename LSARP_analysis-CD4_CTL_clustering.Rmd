@@ -11,6 +11,9 @@ output: html_document
 library(Seurat)
 library(dplyr)
 library(pheatmap)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
 ```
 
 ## Step 1: Filter "CD4" based on expression / non-expression of marker combinations
@@ -72,12 +75,71 @@ saveRDS(hl.filtered.CD4_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/
 
 ## Compare proportion of CD4 CTL cluster:
 
+To calculate proportion for each (patient): Total CD4+ CTL cells / [ Total CD4+ cells | Total cells in patient ]
+
 - between patients
 - diagnostic vs. *all* relapse
 - diagnostic vs. refractory / early relapse
 - HL (diagnostic + relapse) vs. RLN
 
 ```{r}
+# get cells belonging to "CD4 CTL" cluster (and have EBV status)
+hl.CD4_CTL.cells <- which(hl.filtered.CD4_markers.subclustered$celltype2 == "CD4 CTL" &
+                            hl.filtered.CD4_markers.subclustered$ebv %in% c("POS", "NEG"))
+hl.CD4_CTL <- subset(hl.filtered.CD4_markers.subclustered, cells = hl.CD4_CTL.cells)
+
+# get df containing cell barcode and ebv status
+#hl.CD4_CTL.ebv <- cbind(as.data.frame(hl.CD4_CTL$orig.ident), as.data.frame(hl.CD4_CTL$ebv))
+
+# plot proportion of all cells that are CD4+ CTL in each patient
+hl.CD4_CTL.patient.ebv <- as.data.frame(table(hl.CD4_CTL$orig.ident))
+colnames(hl.CD4_CTL.patient.ebv) <- c("sample_id", "num_cells")
+
+# map total CD4+ cells (before subclustering)
+hl.filtered.CD4.patient <- as.data.frame(table(hl.filtered.CD4_markers$orig.ident))
+colnames(hl.filtered.CD4.patient) <- c("sample_id", "total_CD4_cells")
+
+# map total cells per patient
+hl_all.patient <- as.data.frame(table(hl_all.combined$orig.ident))
+colnames(hl_all.patient) <- c("sample_id", "total_cells")
+
+# merge CD4+ CTL df with total cells dfs
+hl.CD4_CTL.df1 <- merge(hl.CD4_CTL.patient.ebv, hl.filtered.CD4.patient, by = "sample_id")
+hl.CD4_CTL.df <- merge(hl.CD4_CTL.df1, hl_all.patient, by = "sample_id")
+
+# calculate proportion of CD4+ CTL cells (based on total CD4 cells or total cells)
+hl.CD4_CTL.df <- transform(hl.CD4_CTL.df, proportion_CD4 = (num_cells / total_CD4_cells) * 100 )
+hl.CD4_CTL.df <- transform(hl.CD4_CTL.df, proportion_total = (num_cells / total_cells) * 100 )
+
+# map on EBV status
+final.cohort <- read.table("~/Documents/sc_HL_relapse/data/final_cohort.plus_RLN.assay_version.txt", sep = "\t", header = TRUE, fill = TRUE)
+final.cohort <- filter(final.cohort, final.cohort$FinalCohort == "yes")
+hl.CD4_CTL.df$ebv <- plyr::mapvalues(
+  x = hl.CD4_CTL.df$sample_id,
+  from = as.character(final.cohort$Sample),
+  to = as.character(final.cohort$EBVStatus)
+)
+
+# plot proportions based on total CD4 filteered cells as denominator
+p1 <- ggplot(data=hl.CD4_CTL.df, aes(x=reorder(sample_id, -proportion_CD4), y=proportion_CD4, fill=ebv)) +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("CD4+ CTL cells (Cluster 9) / CD4 filtered cells (%)") +
+  labs(fill = "EBV")
+
+# plot proportions based on total cells as denominator
+p2 <- ggplot(data=hl.CD4_CTL.df, aes(x=reorder(sample_id, -proportion_total), y=proportion_total, fill=ebv)) +
+  geom_bar(stat="identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  xlab("") + ylab("CD4+ CTL cells (Cluster 9) / Total cells (%)") +
+  labs(fill = "EBV")
+
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/barplot-CD4_CTL_proportions_by_patient.pdf", 
+    width = 10, height = 9.5)
+grid.arrange(p1, p2)
+dev.off()
+
+
 
 ```
 
