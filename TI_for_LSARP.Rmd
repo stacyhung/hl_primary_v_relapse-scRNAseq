@@ -1,0 +1,211 @@
+---
+title: "TI_for_LSARP"
+author: "Stacy Hung"
+date: "26/01/2021"
+output: html_document
+---
+
+## Install packages
+
+```{r}
+# install.packages("devtools")
+#devtools::install_github("dynverse/dyno") # only update packages through CRAN (do not update all)
+
+library(dyno)
+library(tidyverse)
+library(Seurat)
+```
+
+## Prepare the data and identify the best TI methods for the data
+
+```{r}
+library(tidyverse)
+
+hl.CD4_filtered <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/CD4_CTL/hl.filtered.CD4_markers.subclustered.annotated.rds")
+
+# add start cell annotation for celltype2
+
+# retrieve relevant metadata
+data.df <- data.frame(biology = hl.CD4_filtered$biology, 
+                      celltype2 = hl.CD4_filtered$celltype2)
+
+# get expression data and counts (rows: cells; columns: genes)
+expr.df <- t(data.frame(hl.CD4_filtered[["SCT"]]@data))
+counts.df <- t(data.frame(hl.CD4_filtered[["SCT"]]@counts))
+
+# subset genes to HVG list (since running into memory errors will full set of genes)
+hl.all.hvg <- read.table("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.hgv.txt", sep = "\t")
+expr.df <- expr.df[, hl.all.hvg$x]
+counts.df <- counts.df[, hl.all.hvg$x]
+
+# wrap dataset
+dataset <- wrap_expression(
+  counts = counts.df,
+  expression = expr.df
+)
+
+# select best methods for the dataset
+#guidelines <- guidelines_shiny(dataset) # for the first time
+#methods_selected <- guidelines$methods_selected
+
+# guidelines as created in the shiny app
+answers <- dynguidelines::answer_questions(
+  multiple_disconnected = FALSE, 
+  expect_topology = FALSE, 
+  expected_topology = NULL, 
+  expect_cycles = FALSE, 
+  expect_complex_tree = FALSE, 
+  n_cells = 24596, 
+  n_features = 3000, # 21445
+  time = "12h", 
+  memory = "40GB", 
+  prior_information = c("start_id", "end_id", "groups_n"), 
+  docker = TRUE
+)
+guidelines <- dynguidelines::guidelines(
+  dataset,
+  answers = answers)
+
+methods_selected <- guidelines$methods_selected
+# [1] "slingshot" "paga_tree" "paga"      "mst" 
+```
+
+## Identify root / start cell
+
+```{r}
+START_CELL_ID = "";
+
+# For CD4 filtered T cells, the starting cell type is CD4 naive T cells, with high IL7R expression
+# Based on subclustering and heatmap expression, cluster 6 represents the set of CD4 naive T cells
+hl.CD4_filtered <- RenameIdents(hl.CD4_filtered, `6` = "CD4 naive T") # 2255 cells
+# save this as "celltype2"
+hl.CD4_filtered$celltype2 <- Idents(hl.CD4_filtered)
+
+# get expression of CD4 naive T cells
+IL7R.expr <- data.frame(expr = hl.CD4_filtered[["SCT"]]@data["IL7R",], 
+                    celltype = hl.CD4_filtered$celltype2)
+IL7R.CD4_naive.expr <- IL7R.expr %>% filter(celltype == "CD4 naive T")
+
+# sort by expr
+IL7R.CD4_naive.expr.sorted <- IL7R.CD4_naive.expr[ order(IL7R.CD4_naive.expr$expr), ]
+
+START_CELL_ID = rownames(IL7R.CD4_naive.expr[ IL7R.CD4_naive.expr$expr == max(IL7R.CD4_naive.expr$expr), ])
+
+# translate to the rowname version (where dashes become "."s)
+START_CELL_ID.v2 <- gsub("-", ".", START_CELL_ID)
+```
+
+## Run the methods (and add prior information as required)
+
+```{r}
+# PAGA and PAGA tree: add prior information
+dataset <- dataset %>% add_prior_information(start_id = START_CELL_ID.v2)
+
+# to make the results reproducible
+set.seed(1)
+```
+
+## Running multiple models
+
+```{r}
+models <- dynwrap::infer_trajectories(
+  dataset, 
+  method = list(ti_comp1(), ti_angle())
+)
+
+models
+
+
+```
+
+## Slingshot
+
+```{r}
+# run the methods
+model.slingshot <- infer_trajectory(dataset, "slingshot", verbose = TRUE) # slingshot
+
+# retrieve information on the model
+model.slingshot$milestone_network
+head(model.slingshot$progressions)
+
+# plot the trajectory
+plot_graph(model.slingshot)
+
+model.slingshot <- model.slingshot %>% 
+  add_dimred(dyndimred::dimred_mds, expression_source = dataset$expression)
+
+# color by milestone with a dimensionality reduction
+plot_dimred(model.slingshot)
+
+# plot by grouping (mapping of cell id --> group)
+celltype.grouping <- data.df$celltype2
+names(celltype.grouping) <- rownames(data.df)
+plot_dimred(model.slingshot, 
+            grouping = celltype.grouping) + 
+  ggtitle("Cell grouping")
+
+# plot by expression of CD4
+plot_dimred(
+  model.slingshot, 
+  expression_source = dataset$expression,
+  feature_oi = "CD4"
+)
+plot_dimred(
+  model.slingshot, 
+  expression_source = dataset$expression,
+  feature_oi = "CD3D"
+)
+
+# visualize by background color
+plot_dimred(
+  model.slingshot, 
+  expression_source = dataset$expression, 
+  color_cells = "feature",
+  feature_oi = "CD4",
+  color_density = "grouping",
+  label_milestones = FALSE
+)
+
+# combine multiple plots
+#   ***To provide milestone for psuedotime plot
+dynwrap::add_root(trajectory = model.slingshot, root_cell_id = START_CELL_ID)
+pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/slingshot/plot-dim_reduced-collated.pdf", 
+    width = 8, height = 6)
+patchwork::wrap_plots(
+  plot_dimred(model.slingshot, 
+              feature_oi = "CD4", 
+              expression_source = dataset) + 
+    ggtitle("CD4 expression"),
+  plot_dimred(model.slingshot, 
+              feature_oi = "CD3D", 
+              expression_source = dataset) + 
+    ggtitle("CD3D expression"),
+  plot_dimred(model.slingshot, 
+              feature_oi = "IL7R", 
+              expression_source = dataset) + 
+    ggtitle("IL7R expression"),
+  plot_dimred(model.slingshot) + 
+    ggtitle("Cell ordering"),
+  plot_dimred(model.slingshot, 
+              "pseudotime", 
+              pseudotime = calculate_pseudotime(model.slingshot)) + 
+    ggtitle("Pseudotime")
+)
+dev.off()
+
+# plotting in a dendogram
+plot_dendro(model.slingshot)
+plot_dendro(model.slingshot, "pseudotime")
+
+# plot heatmap (by default, plots features that best explain main differences over the whole trajectory)
+plot_heatmap(model.slingshot, expression_source = dataset)
+```
+
+## PAGA and PAGA Tree
+
+```{r}
+model.paga_tree <- infer_trajectory(dataset, "paga_tree", verbose = TRUE) # paga requires start_id
+
+# get information from model
+
+```
