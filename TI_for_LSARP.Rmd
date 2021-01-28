@@ -10,17 +10,17 @@ output: html_document
 ```{r}
 # install.packages("devtools")
 #devtools::install_github("dynverse/dyno") # only update packages through CRAN (do not update all)
+#devtools::install_github("dynverse/dyno", INSTALL_opts="--no-lock") # on gphost
 
 library(dyno)
 library(tidyverse)
 library(Seurat)
+library(tidyverse)
 ```
 
 ## Prepare the data and identify the best TI methods for the data
 
 ```{r}
-library(tidyverse)
-
 hl.CD4_filtered <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/CD4_CTL/hl.filtered.CD4_markers.subclustered.annotated.rds")
 
 # add start cell annotation for celltype2
@@ -101,8 +101,18 @@ START_CELL_ID.v2 <- gsub("-", ".", START_CELL_ID)
 # PAGA and PAGA tree: add prior information
 dataset <- dataset %>% add_prior_information(start_id = START_CELL_ID.v2)
 
+# save to file for future use
+saveRDS(dataset, "~/Documents/sc_HL_relapse/dyno_TI_analysis/output/dataset.CD4_expr_for_hvg.txt")
+dataset <- readRDS("~/Documents/sc_HL_relapse/dyno_TI_analysis/output/dataset.CD4_expr_for_hvg.txt")
+
 # to make the results reproducible
 set.seed(1)
+
+# look at different methods for dimensionality reduction
+dimred_pca <- dyndimred::dimred_pca(dataset$expression)
+dimred_umap <- dyndimred::dimred_umap(dataset$expression)
+dimred_tsne <- dyndimred::dimred_tsne(dataset$expression)
+#dimred_diffusion_map <- dyndimred::dimred_dm_diffusionmap(dataset$expression) # not enough memory
 ```
 
 ## Running multiple models
@@ -118,11 +128,66 @@ models
 
 ```
 
+## Test dataset
+
+```{r}
+test.dataset <- dyntoy::generate_dataset(model = "bifurcating", num_cells = 200)
+```
+
+## PAGA Tree
+
+```{r}
+#model.paga_tree <- infer_trajectory(dataset, "paga_tree", verbose = TRUE) 
+saveRDS(model.paga_tree, "~/Documents/sc_HL_relapse/dyno_TI_analysis/output/CD4/model.paga_tree.rds")
+
+pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/PAGATree/plot-dim_reduced-pca_umap_tse.pdf", 
+    width = 10, height = 8)
+patchwork::wrap_plots(
+  plot_dimred(model.paga_tree) + ggtitle("Default Dim-Red."),
+  plot_dimred(model.paga_tree, dimred = dimred_pca) + ggtitle("PCA reduction"),
+  plot_dimred(model.paga_tree, dimred = dimred_umap) + ggtitle("UMAP reduction"),
+  plot_dimred(model.paga_tree, dimred = dimred_tsne) + ggtitle("TSNE reduction")
+)
+dev.off()
+
+
+
+```
+
+## PAGA 
+
+```{r}
+#model.paga <- infer_trajectory(dataset, "paga", verbose = TRUE) 
+model.paga <- readRDS("~/Documents/sc_HL_relapse/dyno_TI_analysis/output/CD4/model.paga.rds")
+
+pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/PAGA/plot-dim_reduced-pca_umap_tse.pdf", 
+    width = 10, height = 8)
+patchwork::wrap_plots(
+  plot_dimred(model.paga) + ggtitle("Default Dim-Red."),
+  plot_dimred(model.paga, dimred = dimred_pca) + ggtitle("PCA reduction"),
+  plot_dimred(model.paga, dimred = dimred_umap) + ggtitle("UMAP reduction"),
+  plot_dimred(model.paga, dimred = dimred_tsne) + ggtitle("TSNE reduction")
+)
+dev.off()
+
+```
+
 ## Slingshot
 
 ```{r}
 # run the methods
-model.slingshot <- infer_trajectory(dataset, "slingshot", verbose = TRUE) # slingshot
+#model.slingshot <- infer_trajectory(dataset, "slingshot", verbose = TRUE)
+model.slingshot <- readRDS("~/Documents/sc_HL_relapse/dyno_TI_analysis/output/CD4/model.slingshot.rds")
+
+pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/slingshot/plot-dim_reduced-pca_umap_tse.pdf", 
+    width = 10, height = 8)
+patchwork::wrap_plots(
+  plot_dimred(model.slingshot) + ggtitle("Default Dim-Red."),
+  plot_dimred(model.slingshot, dimred = dimred_pca) + ggtitle("PCA reduction"),
+  plot_dimred(model.slingshot, dimred = dimred_umap) + ggtitle("UMAP reduction"),
+  plot_dimred(model.slingshot, dimred = dimred_tsne) + ggtitle("TSNE reduction")
+)
+dev.off()
 
 # retrieve information on the model
 model.slingshot$milestone_network
@@ -168,7 +233,7 @@ plot_dimred(
 
 # combine multiple plots
 #   ***To provide milestone for psuedotime plot
-dynwrap::add_root(trajectory = model.slingshot, root_cell_id = START_CELL_ID)
+dynwrap::add_root(trajectory = model.slingshot, root_cell_id = START_CELL_ID.v2)
 pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/slingshot/plot-dim_reduced-collated.pdf", 
     width = 8, height = 6)
 patchwork::wrap_plots(
@@ -201,11 +266,20 @@ plot_dendro(model.slingshot, "pseudotime")
 plot_heatmap(model.slingshot, expression_source = dataset)
 ```
 
-## PAGA and PAGA Tree
+## MST
 
 ```{r}
-model.paga_tree <- infer_trajectory(dataset, "paga_tree", verbose = TRUE) # paga requires start_id
+# run the methods
+#model.mst <- infer_trajectory(dataset, "mst", verbose = TRUE)
+model.mst <- readRDS("~/Documents/sc_HL_relapse/dyno_TI_analysis/output/CD4/model.mst.rds")
 
-# get information from model
-
+pdf("~/Documents/sc_HL_relapse/dyno_TI_analysis/figures/CD4/MST/plot-dim_reduced-pca_umap_tse.pdf", 
+    width = 10, height = 8)
+patchwork::wrap_plots(
+  plot_dimred(model.mst) + ggtitle("Default Dim-Red."),
+  plot_dimred(model.mst, dimred = dimred_pca) + ggtitle("PCA reduction"),
+  plot_dimred(model.mst, dimred = dimred_umap) + ggtitle("UMAP reduction"),
+  plot_dimred(model.mst, dimred = dimred_tsne) + ggtitle("TSNE reduction")
+)
+dev.off()
 ```
