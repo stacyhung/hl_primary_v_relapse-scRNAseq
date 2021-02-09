@@ -9,8 +9,11 @@ output: html_document
 
 ```{r}
 library(Seurat)
-library(dplyr)
+library(tidyverse)
 library(pheatmap)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
 ```
 
 ## Step 1: Filter for B cells based on expression / non-expression of marker combinations
@@ -21,14 +24,31 @@ hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl
 # Step 1: Filter cells for B cells based on:
 #   Expression of CD20 (MS4A1)
 #   No expression of CD3 (CD3D) CD4, CD8 (CD8A), CD68, CD56 (NCAM1)
-hl.B_markers.cells <- which(hl_all.combined@assays$RNA@data["MS4A1",] > 0 & 
-                               hl_all.combined@assays$RNA@data["CD3D",] == 0 &
-                               hl_all.combined@assays$RNA@data["CD4",] == 0 &
-                               hl_all.combined@assays$RNA@data["CD8A",] == 0 &
-                               hl_all.combined@assays$RNA@data["NCAM1",] == 0 &
-                               hl_all.combined@assays$RNA@data["CD68",] == 0
-                            ) # ? (?% of all cells)
+# ***NB: filtering on RNA "data" and "counts" produces the same results
+# hl.B_markers.cells <- which(hl_all.combined@assays$RNA@counts["MS4A1",] > 0 &
+#                                hl_all.combined@assays$RNA@counts["CD3D",] == 0 &
+#                                hl_all.combined@assays$RNA@counts["CD4",] == 0 &
+#                                hl_all.combined@assays$RNA@counts["CD8A",] == 0 &
+#                                hl_all.combined@assays$RNA@counts["NCAM1",] == 0 &
+#                                hl_all.combined@assays$RNA@counts["CD68",] == 0
+#                            ) # 68122 cells (~40% of all cells)
+# hl.filtered.B_markers <- subset(hl_all.combined, cells = hl.B_markers.cells)
+
+# Step 1: Filter cells for B cells based on:
+#   Expression of CD20 (MS4A1)
+#   No expression of CD3 (CD3D) CD4, CD8 (CD8A), CD68, CD56 (NCAM1)
+# ***NB: filtering on RNA "data" and "counts" produces the same results
+hl.B_markers.cells <- which(hl_all.combined@assays$SCT@data["MS4A1",] > 0 & 
+                               hl_all.combined@assays$SCT@data["CD3D",] == 0 &
+                               hl_all.combined@assays$SCT@data["CD4",] == 0 &
+                               hl_all.combined@assays$SCT@data["CD8A",] == 0 &
+                               hl_all.combined@assays$SCT@data["NCAM1",] == 0 &
+                               hl_all.combined@assays$SCT@data["CD68",] == 0
+                            ) # 68001 cells (~40% of all cells)
 hl.filtered.B_markers <- subset(hl_all.combined, cells = hl.B_markers.cells)
+
+# CD138 would be helpful to identify plasma cell cluster, but CD138 (SDC1) might be too low expression, right?
+# Can you add XBP1 and PRDM1 for the common marker genes?
 ```
 
 ## Step 2: Subcluster and plot heatmaps of clusters
@@ -39,24 +59,77 @@ hl.filtered.B_markers <- FindNeighbors(hl.filtered.B_markers, reduction = "pca",
 hl.filtered.B_markers.subclustered <- FindClusters(hl.filtered.B_markers, resolution = 0.4)
 
 Idents(hl.filtered.B_markers.subclustered) <- hl.filtered.B_markers.subclustered$seurat_clusters
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "RNA"
 
 # plot umap
-pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/umap-Breg-subclusters.pdf", width = 6, height = 5)
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/umap-Breg-subclusters_v2.pdf", width = 6, height = 5)
 DimPlot(hl.filtered.B_markers.subclustered, reduction = "umap", label = TRUE) 
 dev.off()
 
+saveRDS(hl.filtered.B_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered_v2.rds")
+hl.filtered.B_markers.subclustered <- readRDS( "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered_v2.rds")
+
 # plot average expression heatmap for component markers
-avg_exp.heatmaps <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered)
+avg_exp.heatmaps.SCT <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered, useSCT = TRUE)
+avg_exp.heatmaps.RNA.scaled <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered, 
+                                                             useSCT = FALSE, useScaled = TRUE)
+avg_exp.heatmaps.RNA.unscaled <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered, 
+                                                             useSCT = FALSE, useScaled = FALSE)
 
 # plot average expression heatmap for *B-cell-specific* markers
 avg_exp.heatmaps.B_cell <- avg_B_ComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered)
 
 # plot individual expression heatmaps for each cluster
 printSCHeatmapsPerCluster(data = hl.filtered.B_markers.subclustered, 
-                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
+                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/SCT_filtered/")
 
 printSCHeatmapsPerCluster_Bmarkers(data = hl.filtered.B_markers.subclustered, 
                           plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
+```
+
+## Examine differences between V2 and V3 expression for B-reg related genes
+
+```{r}
+component.mappings <- read.table("~/Documents/sc_HL_relapse/data/B_component_genes.txt", 
+                                   sep = "\t", header = TRUE, fill = TRUE)
+breg.genes <- component.mappings$Gene
+
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "SCT"
+
+# expression per patient, coloured by chemistry for all B-reg markers
+plots <- VlnPlot(hl.filtered.B_markers.subclustered, features = breg.genes, 
+                 split.by = "chemistry", group.by = "orig.ident", pt.size = 0.5, combine = FALSE)
+Reduce( `+`, plots ) + patchwork::plot_layout( ncol = 1 ) # replacement for CombinePlots (deprecated)
+
+# expression per patient, coloured by chemistry, for B-reg markers that show the effect of SCT
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "SCT"
+plots.SCT <- VlnPlot(hl.filtered.B_markers.subclustered, features = c("IGHD", "CD24"), 
+                 split.by = "chemistry", group.by = "orig.ident", pt.size = 0.5, combine = FALSE)
+p.SCT <- Reduce( `+`, plots ) + patchwork::plot_layout( ncol = 1 )
+
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "RNA"
+plots.RNA <- VlnPlot(hl.filtered.B_markers.subclustered, features = c("IGHD", "CD24"), 
+                 split.by = "chemistry", group.by = "orig.ident", pt.size = 0.5, combine = FALSE)
+p.RNA <- Reduce( `+`, plots ) + patchwork::plot_layout( ncol = 1 )
+
+# SCT vs. RNA
+grid.arrange(plots.SCT, plots.RNA, ncol=2)
+
+# remove genes not in HVG
+breg.genes <- subset(breg.genes, breg.genes %in% hl.filtered.B_markers.subclustered@assays$integrated@var.features)
+
+# V2 vs. V3 for Breg genes
+dir <- "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/SCT_filtered/"
+VP_by_gene_for_chemistry(data = hl.filtered.B_markers.subclustered, gene_list = breg.genes,
+         file_name = paste(dir, "VlnPlots-SCT_slot-per_Breg_genes-by_chemistry", sep=""), 
+         comp_grps = list(c("V2", "V3")), data_slot = "SCT",
+         width = 20, height = 10)
+
+VP_by_gene_for_cohort(data = hl.filtered.B_markers.subclustered, gene_list = breg.genes,
+         file_name = paste(dir, "VlnPlots-SCT_slot-per_Breg_genes-by_case_type", sep=""), 
+         comp_grps = list(c("Primary", "Relapse")), data_slot = "SCT",
+         width = 20, height = 10)
+
 ```
 
 ## Annotate clusters (Tomo)
@@ -64,17 +137,18 @@ printSCHeatmapsPerCluster_Bmarkers(data = hl.filtered.B_markers.subclustered,
 ```{r}
 # attach manual annotations
 hl.filtered.B_markers.subclustered <- RenameIdents(hl.filtered.B_markers.subclustered,
-                                `0` = "pDC",
-                                `1` = "macrophage",
-                                `2` = "macrophage",
-                                `3` = "pDC",
-                                `4` = "macrophage")
+                                `0` = "",
+                                `1` = "",
+                                `2` = "",
+                                `3` = "",
+                                `4` = "")
 hl.filtered.B_markers.subclustered$celltype2 <- Idents(hl.filtered.B_markers.subclustered)
 pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/CD4/umap-CD4-subclusters-annotated.pdf", width = 6, height = 5)
 DimPlot(hl.filtered.B_markers.subclustered, reduction = "umap", label = TRUE) 
 dev.off()
 
 saveRDS(hl.filtered.B_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered.annotated.rds")
+hl.filtered.B_markers.subclustered <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered.annotated.rds")
 ```
 
 ## Function: Create heatmap of average expression of clusters across *B cell* component markers
@@ -127,6 +201,110 @@ avg_B_ComponentExpressionHeatmap <- function(data) {
 
 ```
 
+## Function: Custom quantile
+
+```{r}
+# Function: Create gradient breaks using quantiles of data
+custom_quantile <- function(x) {
+  out <- c(quantile(x, 0.1), quantile(x, 0.25), median(x), quantile(x,0.75), quantile(x, 0.9))
+  names(out) <- c("ymin", "lower", "middle", "upper", "ymax")
+  return(out)
+}
+```
+
+## V2 vs V3
+
+```{r}
+VP_by_gene_for_cohort <- function(data,
+                       gene_list, 
+                       file_name, 
+                       comp_grps, 
+                       data_slot = "RNA",
+                       width, 
+                       height) {
+  
+  data.df <- NULL
+  expr.df <- NULL
+
+  plot_one_gene <- function(gene){
+    
+    # Step 1: create expr.df dataset (contains columns: expr, cohort version, mean_expr)
+    Idents(data) <- data$cohort
+    # Get the expression data
+    data.df <- data.frame(expr = data[[data_slot]]@data[gene,], cohort = data$cohort)
+    expr.df <- data.df %>% filter(cohort %in% comp_grps[[1]])
+
+    # Step 2: Calculate mean / median
+    expr.df <- as.data.frame(expr.df %>%
+        select(expr, cohort) %>%
+        group_by(cohort) %>%
+        mutate(mean_expr = mean(expr)))
+
+    # Step 3: Plot (note that we are using the Wilcoxon-rank-sum test (deals with smaller numbers better))
+    ggplot(expr.df, aes(x = cohort, y = expr)) + 
+      geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+      #scale_y_continuous(trans='log2') +
+      # Add 10% space on the y-axis above the box plots
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      stat_compare_means(comparisons = comp_grps, label = "p.format") +
+      stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.1) +
+      xlab("") + ylab("") + ggtitle(gene) +
+      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)) +
+      theme(axis.text = element_text(size = 12))
+    
+  }
+  purrr::map(gene_list, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
+  file_name <- paste(file_name, ".png", sep = "")
+  ggsave(file_name, width = width, height = height)
+}
+```
+
+```{r}
+VP_by_gene_for_chemistry <- function(data,
+                       gene_list, 
+                       file_name, 
+                       comp_grps,
+                       data_slot = "RNA",
+                       width, 
+                       height) {
+  
+  data.df <- NULL
+  expr.df <- NULL
+
+  plot_one_gene <- function(gene){
+    
+    # Step 1: create expr.df dataset (contains columns: expr, chemistry version, mean_expr)
+    Idents(data) <- data$chemistry
+    # Get the expression data
+    data.df <- data.frame(expr = data[[data_slot]]@data[gene,], 
+                              chemistry = data$chemistry)
+    expr.df <- data.df %>% filter(chemistry %in% comp_grps[[1]])
+
+    # Step 2: Calculate mean / median
+    expr.df <- as.data.frame(expr.df %>%
+        select(expr, chemistry) %>%
+        group_by(chemistry) %>%
+        mutate(mean_expr = mean(expr)))
+
+    # Step 3: Plot (note that we are using the Wilcoxon-rank-sum test (deals with smaller numbers better))
+    ggplot(expr.df, aes(x = chemistry, y = expr)) + 
+      geom_violin(aes(fill = mean_expr), trim = TRUE, scale = "width") +
+      #scale_y_continuous(trans='log2') +
+      # Add 10% space on the y-axis above the box plots
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      stat_compare_means(comparisons = comp_grps, label = "p.format") +
+      stat_summary(fun.data = custom_quantile, geom = "boxplot", width=0.1) +
+      xlab("") + ylab("") + ggtitle(gene) +
+      theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5)) +
+      theme(axis.text = element_text(size = 12))
+    
+  }
+  purrr::map(gene_list, plot_one_gene) %>% cowplot::plot_grid(plotlist = .)
+  file_name <- paste(file_name, ".png", sep = "")
+  ggsave(file_name, width = width, height = height)
+}
+```
+
 
 ## Function: Create heatmap of average expression of clusters across component markers
 
@@ -134,7 +312,7 @@ Parameters:
   - data: Seurat object with $seurat_clusters
 
 ```{r}
-avgComponentExpressionHeatmap <- function(data) {
+avgComponentExpressionHeatmap <- function(data, useSCT, useScaled = FALSE) {
   # get component markers
   component.mappings <- read.table("~/Documents/sc_HL_relapse/data/component_genes_with_functions.txt", 
                                    sep = "\t", header = TRUE, fill = TRUE)
@@ -144,8 +322,18 @@ avgComponentExpressionHeatmap <- function(data) {
   markers.to.plot <- subset(hvg, hvg %in% component.mappings$Gene)
   # get average expression of each gene
   cluster.averages <- AverageExpression(data, features = markers.to.plot, return.seurat = TRUE)
-  #data.avg <- GetAssayData(object = cluster.averages, slot = "scale.data")
-  data.avg <- GetAssayData(object = cluster.averages, slot = "data", assay = "SCT")
+  
+  if (useSCT) {
+    data.avg <- GetAssayData(object = cluster.averages, slot = "data", assay = "SCT")  
+    # note that the "scale.data" slot does not exist with the SCT assay
+  } else {
+    if (useScaled) {
+      data.avg <- GetAssayData(object = cluster.averages, slot = "scale.data", assay = "RNA")    
+    } else {
+      data.avg <- GetAssayData(object = cluster.averages, slot = "data", assay = "RNA")
+    }
+  }
+  
   # now match component gene list to those being plotted
   component.mappings <- filter(component.mappings, component.mappings$Gene %in% markers.to.plot)
   rownames(component.mappings) <- component.mappings$Gene
@@ -164,13 +352,13 @@ avgComponentExpressionHeatmap <- function(data) {
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
          angle_col = 45, 
-         gaps_row = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53))
+         gaps_row = c(14,20,22,24,27,32,34,38,39,41,42,43,46,53,55))
   # rotated version of heatmap
   heatmaps[[2]] <- pheatmap(t(data.avg.ordered), 
          annotation_col = component.mappings,
          cluster_cols = FALSE, 
          annotation_names_col = FALSE, 
-         gaps_col = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53), 
+         gaps_col = c(14,20,22,24,27,32,34,38,39,41,42,43,46,53,55), 
          angle_col = 45)
   
   return(heatmaps)
@@ -306,7 +494,7 @@ printSCHeatmapsPerCluster <- function(data, plot_folder) {
            cluster_rows = FALSE, 
            annotation_names_row = FALSE, 
            angle_col = 45, 
-           gaps_row = c(14,20,22,24,27,32,34,38,39,40,41,44,51,53), 
+           gaps_row = c(14,20,22,24,27,32,34,38,39,41,42,43,46,53,55), 
            border_color = NA, show_colnames = FALSE, scale = "none")
     dev.off()
   }
