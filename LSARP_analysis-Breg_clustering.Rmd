@@ -21,24 +21,12 @@ library(gridExtra)
 ```{r}
 hl_all.combined <- readRDS("~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.integrated.annotated.rds")
 
-# Step 1: Filter cells for B cells based on:
-#   Expression of CD20 (MS4A1)
-#   No expression of CD3 (CD3D) CD4, CD8 (CD8A), CD68, CD56 (NCAM1)
-# ***NB: filtering on RNA "data" and "counts" produces the same results
-# hl.B_markers.cells <- which(hl_all.combined@assays$RNA@counts["MS4A1",] > 0 &
-#                                hl_all.combined@assays$RNA@counts["CD3D",] == 0 &
-#                                hl_all.combined@assays$RNA@counts["CD4",] == 0 &
-#                                hl_all.combined@assays$RNA@counts["CD8A",] == 0 &
-#                                hl_all.combined@assays$RNA@counts["NCAM1",] == 0 &
-#                                hl_all.combined@assays$RNA@counts["CD68",] == 0
-#                            ) # 68122 cells (~40% of all cells)
-# hl.filtered.B_markers <- subset(hl_all.combined, cells = hl.B_markers.cells)
+MIN_CD20 <- 2
 
 # Step 1: Filter cells for B cells based on:
 #   Expression of CD20 (MS4A1)
 #   No expression of CD3 (CD3D) CD4, CD8 (CD8A), CD68, CD56 (NCAM1)
-# ***NB: filtering on RNA "data" and "counts" produces the same results
-hl.B_markers.cells <- which(hl_all.combined@assays$SCT@data["MS4A1",] > 0 & 
+hl.B_markers.cells <- which(hl_all.combined@assays$SCT@data["MS4A1",] > MIN_CD20 & 
                                hl_all.combined@assays$SCT@data["CD3D",] == 0 &
                                hl_all.combined@assays$SCT@data["CD4",] == 0 &
                                hl_all.combined@assays$SCT@data["CD8A",] == 0 &
@@ -47,8 +35,6 @@ hl.B_markers.cells <- which(hl_all.combined@assays$SCT@data["MS4A1",] > 0 &
                             ) # 68001 cells (~40% of all cells)
 hl.filtered.B_markers <- subset(hl_all.combined, cells = hl.B_markers.cells)
 
-# CD138 would be helpful to identify plasma cell cluster, but CD138 (SDC1) might be too low expression, right?
-# Can you add XBP1 and PRDM1 for the common marker genes?
 ```
 
 ## Step 2: Subcluster and plot heatmaps of clusters
@@ -59,15 +45,15 @@ hl.filtered.B_markers <- FindNeighbors(hl.filtered.B_markers, reduction = "pca",
 hl.filtered.B_markers.subclustered <- FindClusters(hl.filtered.B_markers, resolution = 0.4)
 
 Idents(hl.filtered.B_markers.subclustered) <- hl.filtered.B_markers.subclustered$seurat_clusters
-DefaultAssay(hl.filtered.B_markers.subclustered) <- "RNA"
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "SCT"
 
 # plot umap
-pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/umap-Breg-subclusters_v2.pdf", width = 6, height = 5)
+pdf("~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/umap-Breg-subclusters.pdf", width = 6, height = 5)
 DimPlot(hl.filtered.B_markers.subclustered, reduction = "umap", label = TRUE) 
 dev.off()
 
-saveRDS(hl.filtered.B_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered_v2.rds")
-hl.filtered.B_markers.subclustered <- readRDS( "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/hl.filtered.B_markers.subclustered_v2.rds")
+saveRDS(hl.filtered.B_markers.subclustered, "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/BReg/hl.filtered.B_markers.subclustered_v3.rds")
+hl.filtered.B_markers.subclustered <- readRDS( "~/Documents/sc_HL_relapse/seurat/output/V4_LATEST/BReg/hl.filtered.B_markers.subclustered_v3.rds")
 
 # plot average expression heatmap for component markers
 avg_exp.heatmaps.SCT <- avgComponentExpressionHeatmap(data = hl.filtered.B_markers.subclustered, useSCT = TRUE)
@@ -86,6 +72,18 @@ printSCHeatmapsPerCluster(data = hl.filtered.B_markers.subclustered,
 printSCHeatmapsPerCluster_Bmarkers(data = hl.filtered.B_markers.subclustered, 
                           plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
 ```
+
+## What is the distribution of CD20 (MS4A1) expression?  Is it bimodal?  The lower mode may represent other cell types (not true B) and we may need to filter based on a higher count (i.e. >> 0)
+
+```{r}
+DefaultAssay(hl.filtered.B_markers.subclustered) <- "SCT"
+RidgePlot(hl.filtered.B_markers.subclustered, features = c("MS4A1"), ncol = 1, 
+          log = TRUE, 
+          sort = TRUE, 
+          fill.by = "feature")
+
+```
+
 
 ## Examine differences between V2 and V3 expression for B-reg related genes
 
@@ -115,7 +113,7 @@ p.RNA <- Reduce( `+`, plots ) + patchwork::plot_layout( ncol = 1 )
 # SCT vs. RNA
 grid.arrange(plots.SCT, plots.RNA, ncol=2)
 
-# remove genes not in HVG
+# remove genes not in HVG (for SCT plotting purposes)
 breg.genes <- subset(breg.genes, breg.genes %in% hl.filtered.B_markers.subclustered@assays$integrated@var.features)
 
 # V2 vs. V3 for Breg genes
@@ -125,9 +123,20 @@ VP_by_gene_for_chemistry(data = hl.filtered.B_markers.subclustered, gene_list = 
          comp_grps = list(c("V2", "V3")), data_slot = "SCT",
          width = 20, height = 10)
 
+VP_by_gene_for_chemistry(data = hl.filtered.B_markers.subclustered, gene_list = breg.genes,
+         file_name = paste(dir, "VlnPlots-RNA_slot-per_Breg_genes-by_chemistry", sep=""), 
+         comp_grps = list(c("V2", "V3")), data_slot = "RNA",
+         width = 20, height = 10)
+
+# diagnostic vs. relapse for Breg genes
 VP_by_gene_for_cohort(data = hl.filtered.B_markers.subclustered, gene_list = breg.genes,
          file_name = paste(dir, "VlnPlots-SCT_slot-per_Breg_genes-by_case_type", sep=""), 
          comp_grps = list(c("Primary", "Relapse")), data_slot = "SCT",
+         width = 20, height = 10)
+
+VP_by_gene_for_cohort(data = hl.filtered.B_markers.subclustered, gene_list = breg.genes,
+         file_name = paste(dir, "VlnPlots-RNA_slot-per_Breg_genes-by_case_type", sep=""), 
+         comp_grps = list(c("Primary", "Relapse")), data_slot = "RNA",
          width = 20, height = 10)
 
 ```
@@ -186,14 +195,14 @@ avg_B_ComponentExpressionHeatmap <- function(data) {
          annotation_row = component.mappings,
          cluster_rows = FALSE, 
          annotation_names_row = FALSE, 
-         gaps_row = c(2,3,9,10,12,13), 
+         gaps_row = c(4,5,11,12,14,15), 
          angle_col = 45)
   # rotated version of heatmap
   heatmaps[[2]] <- pheatmap(t(data.avg.ordered), 
          annotation_col = component.mappings,
          cluster_cols = FALSE, 
          annotation_names_col = FALSE, 
-         gaps_col = c(2,3,9,10,12,13), 
+         gaps_col = c(4,5,11,12,14,15), 
          angle_col = 45)
   
   return(heatmaps)
