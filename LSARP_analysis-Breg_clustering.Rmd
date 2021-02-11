@@ -67,7 +67,7 @@ avg_exp.heatmaps.B_cell <- avg_B_ComponentExpressionHeatmap(data = hl.filtered.B
 
 # plot individual expression heatmaps for each cluster
 printSCHeatmapsPerCluster(data = hl.filtered.B_markers.subclustered, 
-                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/SCT_filtered/")
+                          plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
 
 printSCHeatmapsPerCluster_Bmarkers(data = hl.filtered.B_markers.subclustered, 
                           plot_folder = "~/Documents/sc_HL_relapse/seurat/figures/V4_LATEST/BReg/")
@@ -82,6 +82,27 @@ RidgePlot(hl.filtered.B_markers.subclustered, features = c("MS4A1"), ncol = 1,
           sort = TRUE, 
           fill.by = "feature")
 
+```
+
+## Which cluster most likely represents naive B cells?
+
+```{r}
+# add CD10 (MME) / CD24 / IL4R / IL3R (IL3RA) / CD38
+naiveB.genes1 <- c("IGHM", "IGHD", "CD34", "IL7R", "CD27")
+naiveB.genes2 <- c("MME", "CD24", "IL4R", "IL3RA", "CD38")
+naiveB.genes <- c(naiveB.genes1, naiveB.genes2)
+
+FeaturePlot(hl.filtered.B_markers.subclustered, features = naiveB.genes1, ncol = 3)
+FeaturePlot(hl.filtered.B_markers.subclustered, features = naiveB.genes2, ncol = 3)
+
+RidgePlot(hl.filtered.B_markers.subclustered, features = naiveB.genes1,
+          log = TRUE, 
+          sort = TRUE
+          )
+RidgePlot(hl.filtered.B_markers.subclustered, features = naiveB.genes2,
+          log = TRUE, 
+          sort = TRUE
+          )
 ```
 
 
@@ -435,13 +456,14 @@ printSCHeatmapsPerCluster_Bmarkers <- function(data, plot_folder) {
            cluster_rows = FALSE, 
            annotation_names_row = FALSE, 
            angle_col = 45, 
-           gaps_row = c(2,3,9,10,12,13), 
+           gaps_row = c(4,5,11,12,14,15), 
            border_color = NA, show_colnames = FALSE, scale = "none")
     dev.off()
   }
  
 }
 ```
+
 
 ## Function: Produce single-cell level heatmaps of expression for EACH cluster
 
